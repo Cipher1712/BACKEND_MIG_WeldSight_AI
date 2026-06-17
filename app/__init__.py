@@ -1,0 +1,1 @@
+"""MIG-WeldSight AI backend."""
