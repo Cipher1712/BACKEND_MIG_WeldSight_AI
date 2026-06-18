@@ -1,9 +1,25 @@
-def compute_quality_index(std_v: float, sc_count: int, crest_factor: float, score: float, ewma: float) -> dict:
-    def clamp01(x): return max(0.0, min(1.0, x))
-    electrical = clamp01(1 - min(std_v, 3.0) / 3.0) * 100
-    transfer = clamp01(1 - min(abs(sc_count - 2), 6) / 6.0) * 100
-    arc = clamp01(1 - min(abs(crest_factor - 1.1), 0.5) / 0.5) * 100
-    drift = clamp01(1 - min(abs(score - ewma), 4.0) / 4.0) * 100
-    value = round(0.4 * electrical + 0.3 * transfer + 0.2 * arc + 0.1 * drift)
-    band = "Excellent" if value >= 85 else "Good" if value >= 70 else "Monitor" if value >= 50 else "Poor"
-    return {"value": value, "band": band}
+"""Calibrated, monotonic weld quality index."""
+from __future__ import annotations
+
+
+def compute_quality_index(
+    physics_score: float,
+    anomaly_score: float,
+    classifier_confidence: float,
+    stability_score: float,
+    predicted_stable: bool = False,
+) -> dict[str, int | str]:
+    physics_health = 1.0 - max(0.0, min(1.0, physics_score))
+    anomaly_health = 1.0 - max(0.0, min(1.0, anomaly_score))
+    stability_health = max(0.0, min(1.0, stability_score / 100.0))
+    confidence = max(0.0, min(1.0, classifier_confidence))
+    classification_health = confidence if predicted_stable else 1.0 - confidence
+    value = round(100.0 * (
+        0.30 * physics_health + 0.35 * anomaly_health +
+        0.25 * stability_health + 0.10 * classification_health
+    ))
+    category = (
+        "Excellent" if value >= 90 else "Good" if value >= 75 else
+        "Warning" if value >= 55 else "Poor" if value >= 30 else "Critical"
+    )
+    return {"value": int(value), "band": category}

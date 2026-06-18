@@ -4,6 +4,13 @@ pydantic==2.9.2
 SQLAlchemy==2.0.35
 psycopg2-binary==2.9.9
 numpy==1.26.4
+scipy==1.14.1
 scikit-learn==1.5.1
+joblib==1.4.2
+pandas==2.2.3
+torch==2.5.1
+shap==0.46.0
+xgboost==2.1.1
+lightgbm==4.5.0
 python-multipart==0.0.9
 websockets==13.0.1

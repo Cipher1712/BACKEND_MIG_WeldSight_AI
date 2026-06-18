@@ -5,7 +5,8 @@ venv/
 .venv/
 weldsight.db
 *.db
-models/
+models/*
+!models/.gitkeep
 *.pt
 *.pth
 *.pkl

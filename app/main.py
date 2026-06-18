@@ -1,267 +1,232 @@
-"""FastAPI entrypoint for MIG-WeldSight AI backend.
-
-Endpoints
----------
-REST
-  GET  /health
-  GET  /api/profiles
-  GET  /api/profiles/{material}/{t}
-  POST /api/train
-  POST /api/infer
-  GET  /api/events
-
-WebSocket
-  /ws/stream  ESP32  -> backend
-  /ws/live    browser <- backend
-"""
+"""Production FastAPI entrypoint for WeldSight AI."""
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
+import logging
 import os
 import time
-from typing import List, Dict, Any
+from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from .db import get_session, engine
-from .models import Base, Profile, AnomalyEvent
-from .features import extract, windowize
-from .dynamic_threshold import DynamicThreshold
-from .physics_classifier import classify
-from .quality import compute_quality_index
-from .training import train_baseline
 from .analytics import project_and_cluster
+from .db import engine, get_session
+from .features import WINDOW_SIZE, WINDOW_STRIDE, extract, windowize
+from .inference import InferencePipeline
+from .models import AnomalyEvent, Base, Profile
+from .training import train_baseline
 
-app = FastAPI(title="MIG-WeldSight AI", version="1.0.0")
+logger = logging.getLogger("weldsight")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+pipeline = InferencePipeline(os.getenv("MODEL_DIR", "models"))
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    logger.info("WeldSight started; model_ready=%s window=%s stride=%s", pipeline.ready, WINDOW_SIZE, WINDOW_STRIDE)
+    yield
+
+
+app = FastAPI(title="WeldSight AI", version="2.0.0", lifespan=lifespan)
+origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",") if origin.strip()]
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "*").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=origins, allow_credentials=origins != ["*"],
+    allow_methods=["*"], allow_headers=["*"],
 )
 
 
-@app.on_event("startup")
-def _create_tables():
-    Base.metadata.create_all(bind=engine)
-
-
 @app.get("/health")
-def health(): return {"status": "ok", "ts": int(time.time())}
+def health() -> dict:
+    return {"status": "ok", "timestamp": int(time.time()), "model_ready": pipeline.ready,
+            "window_size": WINDOW_SIZE, "stride": WINDOW_STRIDE, "sampling_rate_hz": 750}
 
 
 class ProfileIn(BaseModel):
     material: str
-    thickness_mm: float
-    good_welds: List[Dict[str, List[float]]]
+    thickness_mm: float = Field(gt=0, le=100)
+    good_welds: list[dict[str, list[float]]]
 
 
-def _profile_to_dict(p: Profile) -> dict:
+class InferIn(BaseModel):
+    material: str = "mild_steel"
+    thickness_mm: float = Field(default=6.0, gt=0, le=100)
+    voltage: list[float] = Field(min_length=WINDOW_SIZE, max_length=2_000_000)
+    distance: list[float] | None = None
+
+
+def _profile_to_dict(profile: Profile) -> dict:
     return {
-        "material": p.material, "thickness_mm": float(p.thickness_mm),
-        "learned_k": float(p.learned_k), "mean_score": float(p.mean_score),
-        "std_score": float(p.std_score),
-        "voltage_min": float(p.voltage_min) if p.voltage_min is not None else None,
-        "voltage_max": float(p.voltage_max) if p.voltage_max is not None else None,
-        "rms_min": float(p.rms_min) if p.rms_min is not None else None,
-        "rms_max": float(p.rms_max) if p.rms_max is not None else None,
-        "trained_windows": int(p.trained_windows),
-        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "material": profile.material, "thickness_mm": float(profile.thickness_mm),
+        "learned_k": float(profile.learned_k), "mean_score": float(profile.mean_score),
+        "std_score": float(profile.std_score), "voltage_min": float(profile.voltage_min or 0),
+        "voltage_max": float(profile.voltage_max or 0), "rms_min": float(profile.rms_min or 0),
+        "rms_max": float(profile.rms_max or 0), "trained_windows": int(profile.trained_windows),
+        "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
     }
 
 
-def _load_profile(material: str, thickness_mm: float):
-    with get_session() as s:
-        p = s.query(Profile).filter_by(material=material, thickness_mm=thickness_mm).first()
-        return _profile_to_dict(p) if p else None
-
-
-def _persist_event(distance, score, threshold, cls, quality_value, material, thickness_mm):
-    with get_session() as s:
-        s.add(AnomalyEvent(
+def _persist_event(distance: float, result: dict, material: str, thickness_mm: float) -> None:
+    with get_session() as session:
+        session.add(AnomalyEvent(
             material=material, thickness_mm=thickness_mm, distance_mm=distance,
-            anomaly_score=score, threshold=threshold, physics_label=cls["physics_label"],
-            severity=cls["severity"], quality_index=quality_value, voltage_features=cls["features"],
+            anomaly_score=result["anomaly_score"], threshold=result.get("anomaly_threshold", 0.60),
+            physics_label=result["physics_label"], severity=result["severity"],
+            quality_index=result["quality_index"], voltage_features=result["voltage_features"],
         ))
 
 
 @app.get("/api/profiles")
-def list_profiles():
-    with get_session() as s:
-        return [_profile_to_dict(p) for p in s.query(Profile).all()]
+def list_profiles() -> list[dict]:
+    with get_session() as session:
+        return [_profile_to_dict(row) for row in session.query(Profile).all()]
 
 
 @app.get("/api/profiles/{material}/{thickness_mm}")
-def get_profile(material: str, thickness_mm: float):
-    with get_session() as s:
-        p = s.query(Profile).filter_by(material=material, thickness_mm=thickness_mm).first()
-        if not p:
+def get_profile(material: str, thickness_mm: float) -> dict:
+    with get_session() as session:
+        profile = session.query(Profile).filter_by(material=material, thickness_mm=thickness_mm).first()
+        if profile is None:
             raise HTTPException(404, "profile not found")
-        return _profile_to_dict(p)
+        return _profile_to_dict(profile)
 
 
 @app.post("/api/train")
-def train(req: ProfileIn):
-    result = train_baseline(req.good_welds, req.material, req.thickness_mm)
-    with get_session() as s:
-        p = s.query(Profile).filter_by(material=req.material, thickness_mm=req.thickness_mm).first()
-        if not p:
-            p = Profile(material=req.material, thickness_mm=req.thickness_mm,
-                        learned_k=result["learned_k"], mean_score=result["mean_score"],
-                        std_score=result["std_score"], voltage_min=result["voltage_min"],
-                        voltage_max=result["voltage_max"], rms_min=result["rms_min"],
-                        rms_max=result["rms_max"], trained_windows=result["trained_windows"])
-            s.add(p)
+def train_profile(request: ProfileIn) -> dict:
+    """Retained lightweight profile calibration; offline scripts train ML artifacts."""
+    result = train_baseline(request.good_welds, request.material, request.thickness_mm)
+    with get_session() as session:
+        profile = session.query(Profile).filter_by(
+            material=request.material, thickness_mm=request.thickness_mm
+        ).first()
+        if profile is None:
+            profile = Profile(**{key: value for key, value in result.items() if key != "material"},
+                              material=request.material)
+            session.add(profile)
         else:
-            for k, v in result.items():
-                if hasattr(p, k):
-                    setattr(p, k, v)
+            for key, value in result.items():
+                if hasattr(profile, key):
+                    setattr(profile, key, value)
     return result
 
 
-class InferIn(BaseModel):
-    material: str
-    thickness_mm: float
-    voltage: List[float]
-    distance: List[float] | None = None
-
-
 @app.post("/api/infer")
-def infer(req: InferIn):
-    profile = _load_profile(req.material, req.thickness_mm)
-    k = profile["learned_k"] if profile else 3.0
-    dt = DynamicThreshold(learned_k=k)
-    distance = req.distance or list(range(len(req.voltage)))
-
-    frames: List[dict] = []
-    feature_rows: List[List[float]] = []
-    for d_mid, feats in windowize(req.voltage, distance, size=64, step=32):
-        score = feats.std_v + max(0.0, feats.crest_factor - 1.1) * 4.0
-        t = dt.update(score)
-        cls = classify(feats, score, t["threshold"], req.material, req.thickness_mm)
-        quality = compute_quality_index(feats.std_v, feats.sc_count, feats.crest_factor, score, t["ewma"])
-        frames.append({
-            "distance_mm": d_mid, "anomaly_score": round(score, 3),
-            "threshold": t["threshold"], "quality_index": quality["value"],
-            "physics_label": cls["physics_label"], "severity": cls["severity"],
-            "display_label": cls["display_label"], "possible_causes": cls["possible_causes"],
-            "recommended_actions": cls["recommended_actions"], "voltage_features": feats.to_dict(),
-        })
-        feature_rows.append([feats.mean_v, feats.std_v, feats.rms_v, feats.sc_count, feats.crest_factor])
-        if cls["severity"] != "NORMAL":
-            _persist_event(d_mid, score, t["threshold"], cls, quality["value"], req.material, req.thickness_mm)
-    return {"frames": frames, "cluster": project_and_cluster(feature_rows)}
+def infer(request: InferIn) -> dict:
+    if request.distance is not None and len(request.distance) != len(request.voltage):
+        raise HTTPException(422, "distance and voltage arrays must have equal length")
+    frames, feature_rows = [], []
+    for distance, features in windowize(request.voltage, request.distance):
+        result = pipeline.predict_features(features, request.material, request.thickness_mm)
+        frame = {"timestamp": int(time.time() * 1000), "voltage": features.mean_v,
+                 "distance_mm": distance, **result}
+        frames.append(frame)
+        feature_rows.append(features.to_vector().tolist())
+        if result["anomaly_detected"]:
+            _persist_event(distance, result, request.material, request.thickness_mm)
+    return {"frames": frames, "cluster": project_and_cluster(feature_rows), "model_ready": pipeline.ready}
 
 
 @app.get("/api/events")
-def events(limit: int = Query(200, le=2000)):
-    with get_session() as s:
-        rows = s.query(AnomalyEvent).order_by(AnomalyEvent.ts.desc()).limit(limit).all()
+def events(limit: int = Query(200, ge=1, le=2000)) -> list[dict]:
+    with get_session() as session:
+        rows = session.query(AnomalyEvent).order_by(AnomalyEvent.ts.desc()).limit(limit).all()
         return [{
-            "ts": r.ts.isoformat() if r.ts else None, "material": r.material,
-            "thickness_mm": float(r.thickness_mm), "distance_mm": float(r.distance_mm or 0),
-            "anomaly_score": float(r.anomaly_score or 0), "threshold": float(r.threshold or 0),
-            "physics_label": r.physics_label, "severity": r.severity,
-            "quality_index": r.quality_index, "voltage_features": r.voltage_features,
-        } for r in rows]
+            "timestamp": row.ts.isoformat() if row.ts else None, "material": row.material,
+            "thickness_mm": float(row.thickness_mm), "distance_mm": float(row.distance_mm or 0),
+            "anomaly_score": float(row.anomaly_score or 0), "physics_label": row.physics_label,
+            "severity": row.severity, "quality_index": row.quality_index,
+            "voltage_features": row.voltage_features,
+        } for row in rows]
 
 
 class Hub:
-    def __init__(self):
+    def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
         self.lock = asyncio.Lock()
 
-    async def add(self, ws: WebSocket):
-        await ws.accept()
+    async def add(self, websocket: WebSocket) -> None:
+        await websocket.accept()
         async with self.lock:
-            self.clients.add(ws)
+            self.clients.add(websocket)
 
-    async def remove(self, ws: WebSocket):
+    async def remove(self, websocket: WebSocket) -> None:
         async with self.lock:
-            self.clients.discard(ws)
+            self.clients.discard(websocket)
 
-    async def broadcast(self, frame: dict):
+    async def broadcast(self, frame: dict) -> None:
+        payload = json.dumps(frame, separators=(",", ":"), allow_nan=False)
         async with self.lock:
-            stale: list[WebSocket] = []
-            for c in self.clients:
-                try:
-                    await c.send_text(json.dumps(frame))
-                except Exception:
-                    stale.append(c)
-            for c in stale:
-                self.clients.discard(c)
+            clients = tuple(self.clients)
+        results = await asyncio.gather(*(client.send_text(payload) for client in clients), return_exceptions=True)
+        stale = [client for client, result in zip(clients, results) if isinstance(result, Exception)]
+        if stale:
+            async with self.lock:
+                for client in stale:
+                    self.clients.discard(client)
 
 
 hub = Hub()
 
 
 @app.websocket("/ws/live")
-async def ws_live(ws: WebSocket):
-    await hub.add(ws)
+async def ws_live(websocket: WebSocket) -> None:
+    await hub.add(websocket)
     try:
         while True:
-            await ws.receive_text()
+            await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        await hub.remove(ws)
+        await hub.remove(websocket)
 
 
 @app.websocket("/ws/stream")
-async def ws_stream(ws: WebSocket):
-    await ws.accept()
-    sample_buf: list[float] = []
-    distance_buf: list[float] = []
-    material = "mild_steel"
-    thickness_mm = 6.0
-    profile = _load_profile(material, thickness_mm)
-    k = profile["learned_k"] if profile else 3.0
-    dt = DynamicThreshold(learned_k=k)
+async def ws_stream(websocket: WebSocket) -> None:
+    await websocket.accept()
+    voltage_buffer: list[float] = []
+    distance_buffer: list[float] = []
+    material, thickness_mm = "mild_steel", 6.0
     try:
         while True:
-            raw = await ws.receive_text()
-            msg: Dict[str, Any] = json.loads(raw)
-            if "material" in msg or "thickness_mm" in msg:
-                material = msg.get("material", material)
-                thickness_mm = float(msg.get("thickness_mm", thickness_mm))
-                profile = _load_profile(material, thickness_mm)
-                k = profile["learned_k"] if profile else 3.0
-                dt = DynamicThreshold(learned_k=k)
+            message: dict[str, Any] = json.loads(await websocket.receive_text())
+            if "material" in message or "thickness_mm" in message:
+                material = str(message.get("material", material))
+                thickness_mm = float(message.get("thickness_mm", thickness_mm))
                 continue
-
-            voltage = float(msg.get("voltage", 0.0))
-            distance = float(msg.get("distance_mm", 0.0))
-            arc_on = bool(msg.get("arc_on", True))
-            if not arc_on:
+            if not bool(message.get("arc_on", True)):
+                voltage_buffer.clear(); distance_buffer.clear()
                 continue
-            sample_buf.append(voltage)
-            distance_buf.append(distance)
-            if len(sample_buf) >= 64:
-                feats = extract(sample_buf)
-                score = feats.std_v + max(0.0, feats.crest_factor - 1.1) * 4.0
-                t = dt.update(score)
-                cls = classify(feats, score, t["threshold"], material, thickness_mm)
-                quality = compute_quality_index(feats.std_v, feats.sc_count, feats.crest_factor, score, t["ewma"])
+            values = message.get("voltage")
+            samples = values if isinstance(values, list) else [values]
+            if not samples or samples[0] is None:
+                continue
+            base_distance = float(message.get("distance_mm", distance_buffer[-1] if distance_buffer else 0.0))
+            voltage_buffer.extend(float(value) for value in samples)
+            distance_buffer.extend([base_distance] * len(samples))
+            while len(voltage_buffer) >= WINDOW_SIZE:
+                window = voltage_buffer[:WINDOW_SIZE]
+                features = extract(window)
+                result = pipeline.predict_features(features, material, thickness_mm)
                 frame = {
-                    "timestamp": int(time.time() * 1000),
-                    "voltage": voltage, "distance_mm": distance_buf[-1],
-                    "anomaly_score": round(score, 3), "threshold": t["threshold"],
-                    "quality_index": quality["value"], "physics_label": cls["physics_label"],
-                    "severity": cls["severity"], "display_label": cls["display_label"],
-                    "material": material, "thickness_mm": thickness_mm,
-                    "voltage_features": feats.to_dict(),
-                    "possible_causes": cls["possible_causes"],
-                    "recommended_actions": cls["recommended_actions"],
+                    "timestamp": int(message.get("timestamp", time.time() * 1000)),
+                    "voltage": float(window[-1]), "distance_mm": distance_buffer[WINDOW_SIZE - 1],
+                    "quality_index": result["quality_index"], "severity": result["severity"],
+                    "anomaly_score": result["anomaly_score"], "physics_label": result["physics_label"],
+                    "ml_label": result["ml_label"], "confidence": result["confidence"],
+                    "top_features": result["top_features"], "recommendation": result["recommendation"],
+                    "explanation": result["explanation"], "model_ready": result["model_ready"],
                 }
-                if cls["severity"] != "NORMAL":
-                    _persist_event(distance_buf[-1], score, t["threshold"], cls, quality["value"], material, thickness_mm)
+                if result["anomaly_detected"]:
+                    await asyncio.to_thread(_persist_event, frame["distance_mm"], result, material, thickness_mm)
                 await hub.broadcast(frame)
-                sample_buf = sample_buf[32:]
-                distance_buf = distance_buf[32:]
-    except WebSocketDisconnect:
+                del voltage_buffer[:WINDOW_STRIDE]
+                del distance_buffer[:WINDOW_STRIDE]
+    except (WebSocketDisconnect, ValueError, json.JSONDecodeError):
         return
+    except Exception:
+        logger.exception("stream processing failed")
+        await websocket.close(code=1011)
