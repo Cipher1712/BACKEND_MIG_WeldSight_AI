@@ -42,8 +42,12 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "timestamp": int(time.time()), "model_ready": pipeline.ready,
-            "window_size": WINDOW_SIZE, "stride": WINDOW_STRIDE, "sampling_rate_hz": 750}
+    return {
+        "status": "ok", "timestamp": int(time.time()),
+        **pipeline.health(),
+        "window_size": WINDOW_SIZE, "stride": WINDOW_STRIDE,
+        "sampling_rate_hz": 750,
+    }
 
 
 class ProfileIn(BaseModel):
@@ -214,6 +218,8 @@ async def ws_stream(websocket: WebSocket) -> None:
                 frame = {
                     "timestamp": int(message.get("timestamp", time.time() * 1000)),
                     "voltage": float(window[-1]), "distance_mm": distance_buffer[WINDOW_SIZE - 1],
+                    "quality_score": result["quality_score"], "status": result["status"],
+                    "diagnosis": result["diagnosis"], "top_contributors": result["top_contributors"],
                     "quality_index": result["quality_index"], "severity": result["severity"],
                     "anomaly_score": result["anomaly_score"], "physics_label": result["physics_label"],
                     "ml_label": result["ml_label"], "confidence": result["confidence"],

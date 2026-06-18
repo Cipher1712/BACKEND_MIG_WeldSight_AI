@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "model_ready": true,
+  "vae_loaded": true,
+  "scaler_loaded": true,
+  "threshold_loaded": true,
+  "isolation_forest_loaded": true,
+  "artifacts": {
+    "vae.pt": {
+      "bytes": 29417,
+      "sha256": "b96fde1543153d0e28fa39a8042afac7596b6c94d86525c87b5fd2390ce10bbf"
+    },
+    "scaler.pkl": {
+      "bytes": 1303,
+      "sha256": "8d386faa257795faf0d8bbfdcc74d013d5d76f6e08ecacbb16b873e881a6efe9"
+    },
+    "anomaly_threshold.json": {
+      "bytes": 4292,
+      "sha256": "21f3fad4f11c98fbcc4b549da1dd87cf85f3b6f0eb734d551d6e692754fa17e7"
+    },
+    "isolation_forest.pkl": {
+      "bytes": 2752285,
+      "sha256": "b7eae958c4643152b0cd029766c3a6e9aef87be52409bf00bdf22a4a4b8bd59e"
+    }
+  }
+}

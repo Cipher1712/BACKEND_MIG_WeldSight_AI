@@ -1,4 +1,4 @@
-"""Voltage-only welding physics constraints and interpretable labels."""
+"""Physics-based diagnosis using healthy-data reference ranges."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,50 +9,61 @@ from .features import WindowFeatures
 @dataclass(slots=True)
 class PhysicsAssessment:
     label: str
+    diagnosis: str
     score: float
     stability_score: float
-    violations: dict[str, float]
     recommendation: str
 
-    def to_dict(self) -> dict:
-        return {
-            "physics_label": self.label,
-            "physics_score": self.score,
-            "stability_score": self.stability_score,
-            "physics_violations": self.violations,
-            "recommendation": self.recommendation,
-        }
+
+def _bound(reference: dict, feature: str, quantile: str, default: float) -> float:
+    return float(reference.get(feature, {}).get(quantile, default))
 
 
-def assess(features: WindowFeatures, material: str = "mild_steel", thickness_mm: float = 6.0) -> PhysicsAssessment:
-    heat_factor = {
-        "mild_steel": 1.0, "stainless": 0.92, "aluminium": 1.18,
-        "copper_alloy": 1.25, "hsla": 1.04, "cast_iron": 0.95,
-    }.get(material, 1.0)
-    thickness_factor = min(1.25, max(0.8, thickness_mm / 6.0))
-    expected_v = 22.0 * heat_factor * (0.92 + 0.08 * thickness_factor)
+def assess(features: WindowFeatures, reference: dict | None = None) -> PhysicsAssessment:
+    ref = reference or {}
+    high_variance = features.variance_v > _bound(ref, "variance_v", "q99", 16.0)
+    high_ripple = features.ripple > _bound(ref, "ripple", "q99", 8.0)
+    high_energy = features.energy > _bound(ref, "energy", "q99", 900.0)
+    high_voltage = features.mean_v > _bound(ref, "mean_v", "q99", 35.0)
+    low_energy = features.energy < _bound(ref, "energy", "q01", 100.0)
+    unstable = features.arc_stability_index < _bound(ref, "arc_stability_index", "q01", 35.0)
+    high_short = features.short_circuit_density > _bound(ref, "short_circuit_density", "q99", 60.0)
 
-    violations = {
-        "arc_stability": max(0.0, (70.0 - features.arc_stability_index) / 70.0),
-        "variance": max(0.0, (features.std_v - 1.5) / 3.0),
-        "short_circuit": max(0.0, (features.short_circuit_ratio - 0.18) / 0.45),
-        "spectral_entropy": max(0.0, (features.spectral_entropy - 0.72) / 0.28),
-    }
-    score = min(1.0, 0.35 * violations["arc_stability"] + 0.25 * violations["variance"] +
-                0.25 * violations["short_circuit"] + 0.15 * violations["spectral_entropy"])
-    label = "stable_arc"
-    recommendation = "Maintain current welding parameters."
-    if features.arc_extinction_count:
-        label, recommendation = "abnormal_arc_behaviour", "Check grounding, electrode continuity, and arc length."
-    elif features.short_circuit_ratio > 0.32 or features.short_circuit_count > 8:
-        label, recommendation = "short_circuit_instability", "Inspect wire feed and reduce excessive contact-tip distance."
-    elif features.mean_v > expected_v * 1.18:
-        label, recommendation = "heat_input_high", "Reduce voltage or increase travel speed; verify against the WPS."
-    elif features.mean_v < expected_v * 0.82:
-        label, recommendation = "heat_input_low", "Increase voltage or reduce travel speed; verify against the WPS."
-    elif features.spike_density > 0.18:
-        label, recommendation = "excessive_spatter", "Check polarity, shielding gas, wire feed, and voltage balance."
-    elif score > 0.30:
-        label, recommendation = "arc_instability", "Clean the workpiece and stabilize torch angle and arc length."
-    return PhysicsAssessment(label, round(score, 5), round(features.arc_stability_index, 3),
-                             {k: round(min(1.0, v), 5) for k, v in violations.items()}, recommendation)
+    score = min(1.0, (
+        max(0.0, 1.0 - features.arc_stability_index / 100.0) * 0.40 +
+        min(1.0, features.short_circuit_ratio / 0.40) * 0.25 +
+        min(1.0, features.ripple / max(abs(features.mean_v), 1.0)) * 0.20 +
+        min(1.0, features.noise_index / max(abs(features.mean_v), 1.0)) * 0.15
+    ))
+    if high_energy and high_voltage:
+        return PhysicsAssessment(
+            "burn_through_risk",
+            "High voltage and high electrical energy exceed the healthy operating envelope.",
+            score, features.arc_stability_index,
+            "Reduce voltage or increase travel speed and verify the welding procedure.",
+        )
+    if low_energy and unstable:
+        return PhysicsAssessment(
+            "cold_arc_risk",
+            "Low electrical energy combined with unstable voltage indicates a cold-arc risk.",
+            score, features.arc_stability_index,
+            "Check voltage setpoint, stick-out, grounding, and travel speed.",
+        )
+    if high_short:
+        return PhysicsAssessment(
+            "transfer_irregularity",
+            "Short-circuit event density is above the healthy transfer envelope.",
+            score, features.arc_stability_index,
+            "Inspect wire feed, contact-tip distance, polarity, and shielding gas.",
+        )
+    if high_variance and high_ripple:
+        return PhysicsAssessment(
+            "arc_instability",
+            "High voltage variance and ripple indicate arc instability.",
+            score, features.arc_stability_index,
+            "Stabilize torch angle and arc length; clean the joint and verify grounding.",
+        )
+    return PhysicsAssessment(
+        "healthy_arc", "Voltage behavior is within the learned healthy operating envelope.",
+        score, features.arc_stability_index, "Maintain the current welding parameters.",
+    )

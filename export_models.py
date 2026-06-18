@@ -1,4 +1,6 @@
-"""Validate and package production model artifacts."""
+"""Validate WeldSight anomaly artifact bundle."""
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -10,12 +12,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--models", default="models")
 args = parser.parse_args()
 root = Path(args.models)
-required = ["vae.pt", "classifier.pkl", "scaler.pkl", "thresholds.json", "isolation_forest.pkl"]
+required = ["vae.pt", "scaler.pkl", "anomaly_threshold.json", "isolation_forest.pkl"]
 missing = [name for name in required if not (root / name).exists()]
 if missing:
     raise SystemExit(f"Missing artifacts: {', '.join(missing)}")
 pipeline = InferencePipeline(root)
-manifest = {"version": 1, "model_ready": pipeline.ready, "artifacts": {}}
+manifest = {"version": 1, **pipeline.health(), "artifacts": {}}
 for name in required:
     data = (root / name).read_bytes()
     manifest["artifacts"][name] = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}

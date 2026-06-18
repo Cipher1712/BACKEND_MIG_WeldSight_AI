@@ -2,9 +2,9 @@
 
 Production voltage-only welding intelligence:
 
-`750 Hz voltage -> 64/32 windowing -> 30 features -> physics -> EWMA +
-Isolation Forest + physics-informed VAE -> defect classifier -> explanation ->
-quality index -> WebSocket`
+`750 Hz voltage -> validation -> 64/32 windowing -> 30 features -> physics ->
+EWMA -> Isolation Forest -> physics-informed VAE -> quality index ->
+explainability -> WebSocket`
 
 The 64-sample window covers 85.3 ms and produces a result every 42.7 ms.
 
@@ -19,9 +19,9 @@ The 64-sample window covers 85.3 ms and produces a result every 42.7 ms.
 5. Deploy. Apply schema once if you prefer explicit migrations:
    `railway run psql $DATABASE_URL -f schema.sql`
    (Otherwise SQLAlchemy `create_all` runs at startup.)
-5. Place exported artifacts in `models/`, or attach a Railway volume and set
-   `MODEL_DIR`. Until artifacts are present, the service runs in an explicit
-   physics fallback mode (`model_ready: false`).
+5. Train or place exported artifacts in `models/`, or attach a Railway volume
+   and set `MODEL_DIR`. Until artifacts are present, the service runs in an
+   explicit physics fallback mode (`model_ready: false`).
 6. Copy the public URL, e.g. `https://weldsight-api.up.railway.app`.
 
 ## Local development
@@ -45,28 +45,35 @@ DATABASE_URL=sqlite:///./weldsight.db uvicorn app.main:app --reload --port 8000
 | WS     | `/ws/stream`                        | ESP32 -> backend ingest          |
 | WS     | `/ws/live`                          | Frontend <- backend live frames  |
 
-## Offline model training
+## Offline model training from real data only
 
-Datasets may be CSV/Parquet feature tables or JSON weld records. Feature tables
-must contain the 30 names returned by `WindowFeatures.names()` and classifiers
-also require a `label` column. Supported labels are:
+The training script uses only real voltage traces from:
 
-`stable_arc`, `arc_instability`, `excessive_spatter`, `porosity_risk`,
-`heat_input_high`, `heat_input_low`, `short_circuit_instability`,
-`abnormal_arc_behaviour`, and `unknown_anomaly`.
+- `data/MIG Sensor Data/*.csv` for healthy VAE/Isolation Forest training
+- `data/Data_I*.csv` for real-condition evaluation
+
+Only voltage columns are read. Supported voltage aliases are `MIGVoltage`,
+`MIG Voltage`, `Voltage`, `ArcVoltage`, `Voltage_V`, and the observed
+`MigVolatge` typo in the provided files. Current, TIG, encoder, and any label
+columns are ignored.
 
 ```bash
-python train_vae.py healthy_welds.json --output models
-python train_classifier.py labeled_welds.json --output models
-python evaluate.py held_out_welds.json --models models
+python scripts/train_vae.py --data data --output models --epochs 25
+python scripts/evaluate_models.py --data data --models models
 python export_models.py --models models
 pytest -q
 ```
 
-Classifier training compares Random Forest, XGBoost, LightGBM, SVM, and MLP
-with stratified cross-validation and randomized hyperparameter search. If an
-optional training library is unavailable, the report records only the models
-that were actually available.
+Generated artifacts:
+
+- `models/vae.pt`
+- `models/scaler.pkl`
+- `models/isolation_forest.pkl`
+- `models/anomaly_threshold.json`
+
+No supervised defect classifier is trained because the provided data has no
+trusted defect labels. Diagnoses are physics-based, for example arc instability,
+burn-through risk, cold arc risk, and transfer irregularity.
 
 First frame the firmware should send is a setup frame:
 

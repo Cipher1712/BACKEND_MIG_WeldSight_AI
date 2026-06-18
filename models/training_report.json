@@ -1,0 +1,208 @@
+{
+  "training_windows": 20395,
+  "validation_windows": 3059,
+  "latent_dim": 8,
+  "validation_reconstruction": 0.09991497546434402,
+  "device": "cpu",
+  "artifacts": [
+    "vae.pt",
+    "scaler.pkl",
+    "isolation_forest.pkl",
+    "anomaly_threshold.json"
+  ],
+  "source": "real_voltage_only",
+  "datasets": [
+    {
+      "path": "data\\MIG Sensor Data\\Sample  0.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 61183,
+      "valid_windows": 479
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 1.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 45820,
+      "valid_windows": 487
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 10.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 140115,
+      "valid_windows": 475
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 11.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 199040,
+      "valid_windows": 533
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 12.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 18757,
+      "valid_windows": 570
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 13.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 141769,
+      "valid_windows": 689
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 14.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 163654,
+      "valid_windows": 489
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 15.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 140480,
+      "valid_windows": 571
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 16.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 99709,
+      "valid_windows": 714
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 17.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 103715,
+      "valid_windows": 485
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 18.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 292541,
+      "valid_windows": 1155
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 19.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 121564,
+      "valid_windows": 693
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 2.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 267003,
+      "valid_windows": 562
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 20.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 26067,
+      "valid_windows": 499
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 21.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 19362,
+      "valid_windows": 589
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 22.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 174699,
+      "valid_windows": 704
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 23.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 168464,
+      "valid_windows": 475
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 24.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 114149,
+      "valid_windows": 580
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 25.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 105677,
+      "valid_windows": 710
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 26.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 50740,
+      "valid_windows": 482
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 27.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 180043,
+      "valid_windows": 593
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 28.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 22931,
+      "valid_windows": 700
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 29.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 23068,
+      "valid_windows": 704
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 3.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 66090,
+      "valid_windows": 704
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 30.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 30251,
+      "valid_windows": 927
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 31.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 120246,
+      "valid_windows": 924
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 4.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 515667,
+      "valid_windows": 482
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 5.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 90676,
+      "valid_windows": 552
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 6.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 112167,
+      "valid_windows": 695
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 7.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 29498,
+      "valid_windows": 900
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 8.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 168199,
+      "valid_windows": 688
+    },
+    {
+      "path": "data\\MIG Sensor Data\\Sample 9.csv",
+      "voltage_column": "MigVolatge",
+      "samples": 200192,
+      "valid_windows": 585
+    }
+  ]
+}

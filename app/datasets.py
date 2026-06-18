@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 
 from .features import WindowFeatures, feature_matrix, windowize
-from .physics import assess
 
 
 def load_feature_dataset(path: str, require_labels: bool = True) -> tuple[np.ndarray, np.ndarray | None, np.ndarray]:
@@ -20,18 +19,15 @@ def load_feature_dataset(path: str, require_labels: bool = True) -> tuple[np.nda
     elif source.suffix.lower() == ".json":
         payload = json.loads(source.read_text())
         records = payload if isinstance(payload, list) else payload.get("welds", [])
-        rows, labels, violations = [], [], []
+        rows, labels = [], []
         for record in records:
             voltage = record.get("voltage", [])
             distance = record.get("distance")
             for _, feature in windowize(voltage, distance):
                 rows.append(feature)
-                labels.append(record.get("label", "stable_arc"))
-                violations.append(list(assess(
-                    feature, record.get("material", "mild_steel"),
-                    float(record.get("thickness_mm", 6.0)),
-                ).violations.values()))
-        return feature_matrix(rows), np.asarray(labels) if labels else None, np.asarray(violations, dtype=np.float32)
+                if "label" in record:
+                    labels.append(record["label"])
+        return feature_matrix(rows), np.asarray(labels) if labels else None, np.zeros((len(rows), 4), dtype=np.float32)
     else:
         raise ValueError("dataset must be CSV, Parquet, or JSON")
 

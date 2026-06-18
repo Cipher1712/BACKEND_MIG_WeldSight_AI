@@ -67,6 +67,13 @@ class VAEInference:
         latent = float(np.sqrt(np.mean(((z - self.latent_center) / (self.latent_scale + 1e-6)) ** 2)))
         return rec, latent
 
+    def reconstruction_contributions(self, features: np.ndarray) -> np.ndarray:
+        x = torch.as_tensor(features, dtype=torch.float32, device=self.device)
+        self.model.eval()
+        with torch.inference_mode():
+            reconstruction, _, _ = self.model(x)
+        return ((reconstruction - x) ** 2)[0].cpu().numpy()
+
 
 def load_vae(path: str, device: str = "cpu") -> VAEInference:
     payload = torch.load(path, map_location=device, weights_only=False)
