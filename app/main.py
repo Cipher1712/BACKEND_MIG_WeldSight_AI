@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .analytics import project_and_cluster
-from .db import engine, get_session
+from .db import engine, get_session, repair_sqlite_autoincrement_tables
 from .features import WINDOW_SIZE, WINDOW_STRIDE, extract, windowize
 from .inference import InferencePipeline
 from .models import AnomalyEvent, Base, Profile
@@ -27,6 +27,7 @@ pipeline = InferencePipeline(os.getenv("MODEL_DIR", "models"))
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    repair_sqlite_autoincrement_tables()
     Base.metadata.create_all(bind=engine)
     logger.info("WeldSight started; model_ready=%s window=%s stride=%s", pipeline.ready, WINDOW_SIZE, WINDOW_STRIDE)
     yield

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, TIMESTAMP, BigInteger, JSON, UniqueConstraint, func
+from sqlalchemy import Column, Integer, String, Numeric, TIMESTAMP, JSON, UniqueConstraint, func
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -23,7 +23,7 @@ class Profile(Base):
 
 class AnomalyEvent(Base):
     __tablename__ = "anomaly_events"
-    id = Column(BigInteger, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     ts = Column(TIMESTAMP(timezone=True), server_default=func.now())
     material = Column(String, nullable=False)
     thickness_mm = Column(Numeric(6, 2), nullable=False)
