@@ -5,19 +5,21 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 import logging
+import math
 import os
 import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .analytics import project_and_cluster
 from .db import engine, get_session, repair_sqlite_autoincrement_tables
 from .features import WINDOW_SIZE, WINDOW_STRIDE, extract, windowize
 from .inference import InferencePipeline
 from .models import AnomalyEvent, Base, Profile
+from .telemetry_state import telemetry_state
 from .training import train_baseline
 
 logger = logging.getLogger("weldsight")
@@ -44,7 +46,7 @@ app.add_middleware(
 @app.get("/health")
 def health() -> dict:
     return {
-        "status": "ok", "timestamp": int(time.time()),
+        "status": "healthy", "timestamp": int(time.time()),
         **pipeline.health(),
         "window_size": WINDOW_SIZE, "stride": WINDOW_STRIDE,
         "sampling_rate_hz": 750,
@@ -62,6 +64,31 @@ class InferIn(BaseModel):
     thickness_mm: float = Field(default=6.0, gt=0, le=100)
     voltage: list[float] = Field(min_length=WINDOW_SIZE, max_length=2_000_000)
     distance: list[float] | None = None
+
+
+class TelemetryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voltage: list[float] = Field(min_length=1, max_length=20_000)
+    distance_mm: float = 0.0
+    arc_on: bool = True
+    timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
+    material: str = "mild_steel"
+    thickness_mm: float = Field(default=6.0, gt=0, le=100)
+
+    @field_validator("voltage")
+    @classmethod
+    def voltage_must_be_finite(cls, values: list[float]) -> list[float]:
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("voltage values must be finite numbers")
+        return values
+
+    @field_validator("distance_mm", "thickness_mm")
+    @classmethod
+    def scalar_must_be_finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("value must be a finite number")
+        return value
 
 
 def _profile_to_dict(profile: Profile) -> dict:
@@ -83,6 +110,71 @@ def _persist_event(distance: float, result: dict, material: str, thickness_mm: f
             physics_label=result["physics_label"], severity=result["severity"],
             quality_index=result["quality_index"], voltage_features=result["voltage_features"],
         ))
+
+
+def _event_row_to_dict(row: AnomalyEvent) -> dict:
+    return {
+        "timestamp": row.ts.isoformat() if row.ts else None, "material": row.material,
+        "thickness_mm": float(row.thickness_mm), "distance_mm": float(row.distance_mm or 0),
+        "anomaly_score": float(row.anomaly_score or 0), "physics_label": row.physics_label,
+        "severity": row.severity, "quality_index": row.quality_index,
+        "voltage_features": row.voltage_features,
+    }
+
+
+def _build_live_frame(
+    *,
+    timestamp: int,
+    voltage: float,
+    distance_mm: float,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "timestamp": timestamp,
+        "voltage": voltage,
+        "distance_mm": distance_mm,
+        "quality_score": result["quality_score"],
+        "status": result["status"],
+        "diagnosis": result["diagnosis"],
+        "top_contributors": result["top_contributors"],
+        "quality_index": result["quality_index"],
+        "quality_category": result["quality_category"],
+        "severity": result["severity"],
+        "anomaly_score": result["anomaly_score"],
+        "anomaly_threshold": result["anomaly_threshold"],
+        "anomaly_detected": result["anomaly_detected"],
+        "anomaly_stages": result["anomaly_stages"],
+        "physics_label": result["physics_label"],
+        "ml_label": result["ml_label"],
+        "prediction": result["prediction"],
+        "confidence": result["confidence"],
+        "top_features": result["top_features"],
+        "recommendation": result["recommendation"],
+        "explanation": result["explanation"],
+        "stability_score": result["stability_score"],
+        "voltage_features": result["voltage_features"],
+        "model_ready": result["model_ready"],
+    }
+
+
+async def _process_telemetry_packet(packet: dict[str, Any], material: str, thickness_mm: float) -> list[dict[str, Any]]:
+    frames: list[dict[str, Any]] = []
+    windows = telemetry_state.append_packet(packet)
+    for window, distance_mm in windows:
+        features = extract(window)
+        result = pipeline.predict_features(features, material, thickness_mm)
+        frame = _build_live_frame(
+            timestamp=int(packet["timestamp"]),
+            voltage=float(window[-1]),
+            distance_mm=distance_mm,
+            result=result,
+        )
+        if result["anomaly_detected"]:
+            await asyncio.to_thread(_persist_event, distance_mm, result, material, thickness_mm)
+        telemetry_state.record_frame(frame)
+        await hub.broadcast(frame)
+        frames.append(frame)
+    return frames
 
 
 @app.get("/api/profiles")
@@ -139,13 +231,40 @@ def infer(request: InferIn) -> dict:
 def events(limit: int = Query(200, ge=1, le=2000)) -> list[dict]:
     with get_session() as session:
         rows = session.query(AnomalyEvent).order_by(AnomalyEvent.ts.desc()).limit(limit).all()
-        return [{
-            "timestamp": row.ts.isoformat() if row.ts else None, "material": row.material,
-            "thickness_mm": float(row.thickness_mm), "distance_mm": float(row.distance_mm or 0),
-            "anomaly_score": float(row.anomaly_score or 0), "physics_label": row.physics_label,
-            "severity": row.severity, "quality_index": row.quality_index,
-            "voltage_features": row.voltage_features,
-        } for row in rows]
+        return [_event_row_to_dict(row) for row in rows]
+
+
+@app.post("/telemetry")
+async def ingest_telemetry(request: TelemetryIn) -> dict:
+    packet = request.model_dump()
+    frames = await _process_telemetry_packet(packet, request.material, request.thickness_mm)
+    return {
+        "status": "accepted",
+        "timestamp": request.timestamp,
+        "samples_received": len(request.voltage),
+        "frames_processed": len(frames),
+        "model_ready": pipeline.ready,
+    }
+
+
+@app.get("/telemetry/latest")
+def latest_telemetry() -> dict:
+    return telemetry_state.latest_telemetry()
+
+
+@app.get("/metrics/latest")
+def latest_metrics() -> dict:
+    return telemetry_state.latest_metrics()
+
+
+@app.get("/events/latest")
+def latest_events(limit: int = Query(20, ge=1, le=200)) -> list[dict]:
+    state_events = telemetry_state.latest_events()
+    if state_events:
+        return state_events[:limit]
+    with get_session() as session:
+        rows = session.query(AnomalyEvent).order_by(AnomalyEvent.ts.desc()).limit(limit).all()
+        return [_event_row_to_dict(row) for row in rows]
 
 
 class Hub:
@@ -179,6 +298,7 @@ hub = Hub()
 
 @app.websocket("/ws/live")
 async def ws_live(websocket: WebSocket) -> None:
+    # Deprecated: retained temporarily for frontend rollback during HTTP polling migration.
     await hub.add(websocket)
     try:
         while True:
@@ -191,9 +311,8 @@ async def ws_live(websocket: WebSocket) -> None:
 
 @app.websocket("/ws/stream")
 async def ws_stream(websocket: WebSocket) -> None:
+    # Deprecated: retained temporarily for ESP32 rollback during HTTP telemetry migration.
     await websocket.accept()
-    voltage_buffer: list[float] = []
-    distance_buffer: list[float] = []
     material, thickness_mm = "mild_steel", 6.0
     try:
         while True:
@@ -203,35 +322,27 @@ async def ws_stream(websocket: WebSocket) -> None:
                 thickness_mm = float(message.get("thickness_mm", thickness_mm))
                 continue
             if not bool(message.get("arc_on", True)):
-                voltage_buffer.clear(); distance_buffer.clear()
+                await _process_telemetry_packet({
+                    "voltage": [0.0],
+                    "distance_mm": float(message.get("distance_mm", 0.0)),
+                    "arc_on": False,
+                    "timestamp": int(message.get("timestamp", time.time() * 1000)),
+                    "material": material,
+                    "thickness_mm": thickness_mm,
+                }, material, thickness_mm)
                 continue
             values = message.get("voltage")
             samples = values if isinstance(values, list) else [values]
             if not samples or samples[0] is None:
                 continue
-            base_distance = float(message.get("distance_mm", distance_buffer[-1] if distance_buffer else 0.0))
-            voltage_buffer.extend(float(value) for value in samples)
-            distance_buffer.extend([base_distance] * len(samples))
-            while len(voltage_buffer) >= WINDOW_SIZE:
-                window = voltage_buffer[:WINDOW_SIZE]
-                features = extract(window)
-                result = pipeline.predict_features(features, material, thickness_mm)
-                frame = {
-                    "timestamp": int(message.get("timestamp", time.time() * 1000)),
-                    "voltage": float(window[-1]), "distance_mm": distance_buffer[WINDOW_SIZE - 1],
-                    "quality_score": result["quality_score"], "status": result["status"],
-                    "diagnosis": result["diagnosis"], "top_contributors": result["top_contributors"],
-                    "quality_index": result["quality_index"], "severity": result["severity"],
-                    "anomaly_score": result["anomaly_score"], "physics_label": result["physics_label"],
-                    "ml_label": result["ml_label"], "confidence": result["confidence"],
-                    "top_features": result["top_features"], "recommendation": result["recommendation"],
-                    "explanation": result["explanation"], "model_ready": result["model_ready"],
-                }
-                if result["anomaly_detected"]:
-                    await asyncio.to_thread(_persist_event, frame["distance_mm"], result, material, thickness_mm)
-                await hub.broadcast(frame)
-                del voltage_buffer[:WINDOW_STRIDE]
-                del distance_buffer[:WINDOW_STRIDE]
+            await _process_telemetry_packet({
+                "voltage": [float(value) for value in samples],
+                "distance_mm": float(message.get("distance_mm", 0.0)),
+                "arc_on": True,
+                "timestamp": int(message.get("timestamp", time.time() * 1000)),
+                "material": material,
+                "thickness_mm": thickness_mm,
+            }, material, thickness_mm)
     except (WebSocketDisconnect, ValueError, json.JSONDecodeError):
         return
     except Exception:
