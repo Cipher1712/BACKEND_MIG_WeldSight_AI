@@ -15,6 +15,16 @@ from .physics import assess
 from .quality import compute_quality_index
 
 
+def _confidence(label: str, rule_strength: float, strong_rule_count: int, anomaly_score: float, threshold: float) -> float:
+    anomaly_severity = float(np.clip(anomaly_score / max(threshold, 1e-9), 0.0, 1.0))
+    if label == "Healthy Arc":
+        value = 0.55 + 0.35 * rule_strength + 0.10 * (1.0 - anomaly_severity)
+    else:
+        corroboration = min(0.10, 0.05 * max(0, strong_rule_count - 1))
+        value = 0.50 + 0.35 * rule_strength + 0.15 * anomaly_severity + corroboration
+    return round(float(np.clip(value, 0.0, 1.0)), 5)
+
+
 class InferencePipeline:
     def __init__(self, model_dir: str | os.PathLike = "models"):
         path = Path(model_dir)
@@ -73,21 +83,21 @@ class InferencePipeline:
             physics.stability_score, variance_health, anomaly.vae_score,
             anomaly.isolation_score, physics.score,
         )
-        status = (
-            "Critical Arc" if quality["value"] < 30 else
-            "Unstable Arc" if anomaly.is_anomaly or physics.label != "healthy_arc" else
-            "Healthy Arc"
-        )
+        status = physics.label
         contributors = self._contributors(scaled)
         severity = (
             "CRITICAL" if quality["value"] < 30 else "POOR" if quality["value"] < 55 else
             "WARNING" if quality["value"] < 75 else "NORMAL"
         )
+        confidence = _confidence(
+            physics.label, physics.rule_strength, physics.strong_rule_count,
+            anomaly.score, anomaly.threshold,
+        )
         return {
             # New healthy-only contract.
             "quality_score": quality["value"], "anomaly_score": anomaly.score,
             "status": status, "diagnosis": physics.diagnosis,
-            "top_contributors": contributors,
+            "top_contributors": physics.top_contributors,
             # Existing frontend-compatible fields.
             "quality_index": quality["value"], "quality_category": quality["band"],
             "severity": severity, "anomaly_threshold": anomaly.threshold,
@@ -99,7 +109,9 @@ class InferencePipeline:
             },
             "physics_label": physics.label, "ml_label": physics.label,
             "prediction": physics.label,
-            "confidence": round(1.0 - min(anomaly.score, 1.0), 5),
+            "confidence": confidence,
+            **physics.risk_scores,
+            "quality_breakdown": physics.quality_breakdown,
             "top_features": contributors, "explanation": physics.diagnosis,
             "recommendation": physics.recommendation,
             "stability_score": round(physics.stability_score, 4),

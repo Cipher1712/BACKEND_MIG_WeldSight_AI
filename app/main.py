@@ -19,6 +19,7 @@ from .db import engine, get_session, repair_sqlite_autoincrement_tables
 from .features import WINDOW_SIZE, WINDOW_STRIDE, extract, windowize
 from .inference import InferencePipeline
 from .models import AnomalyEvent, Base, Profile
+from .physics import LABELS
 from .telemetry_state import telemetry_state
 from .training import train_baseline
 
@@ -102,6 +103,12 @@ def _profile_to_dict(profile: Profile) -> dict:
     }
 
 
+def _display_label(label: str | None) -> str:
+    if not label:
+        return "Healthy Arc"
+    return LABELS.get(label, label)
+
+
 def _persist_event(distance: float, result: dict, material: str, thickness_mm: float) -> None:
     with get_session() as session:
         session.add(AnomalyEvent(
@@ -116,7 +123,7 @@ def _event_row_to_dict(row: AnomalyEvent) -> dict:
     return {
         "timestamp": row.ts.isoformat() if row.ts else None, "material": row.material,
         "thickness_mm": float(row.thickness_mm), "distance_mm": float(row.distance_mm or 0),
-        "anomaly_score": float(row.anomaly_score or 0), "physics_label": row.physics_label,
+        "anomaly_score": float(row.anomaly_score or 0), "physics_label": _display_label(row.physics_label),
         "severity": row.severity, "quality_index": row.quality_index,
         "voltage_features": row.voltage_features,
     }
@@ -148,7 +155,12 @@ def _build_live_frame(
         "ml_label": result["ml_label"],
         "prediction": result["prediction"],
         "confidence": result["confidence"],
+        "arc_instability_score": result["arc_instability_score"],
+        "spatter_risk_score": result["spatter_risk_score"],
+        "burn_through_risk_score": result["burn_through_risk_score"],
+        "low_heat_input_score": result["low_heat_input_score"],
         "top_features": result["top_features"],
+        "quality_breakdown": result["quality_breakdown"],
         "recommendation": result["recommendation"],
         "explanation": result["explanation"],
         "stability_score": result["stability_score"],

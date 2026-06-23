@@ -36,6 +36,24 @@ def test_quality_is_monotonic():
 
 def test_fallback_inference_contract_on_real_voltage():
     result = InferencePipeline("models-do-not-exist").predict(real_window())
-    required = {"quality_score", "anomaly_score", "status", "diagnosis", "top_contributors"}
+    required = {
+        "quality_score", "anomaly_score", "status", "diagnosis", "top_contributors",
+        "confidence", "arc_instability_score", "spatter_risk_score",
+        "burn_through_risk_score", "low_heat_input_score", "quality_breakdown",
+    }
     assert required <= result.keys()
     assert result["model_ready"] is False
+    assert result["physics_label"] == result["prediction"] == result["ml_label"] == result["status"]
+    assert 0.0 <= result["confidence"] <= 1.0
+    assert all(0.0 <= result[key] <= 1.0 for key in (
+        "arc_instability_score",
+        "spatter_risk_score",
+        "burn_through_risk_score",
+        "low_heat_input_score",
+    ))
+    assert result["quality_breakdown"] == {
+        "stability": 0.40,
+        "short_circuit": 0.25,
+        "ripple": 0.20,
+        "noise": 0.15,
+    }

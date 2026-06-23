@@ -24,8 +24,20 @@ def test_health_and_batch_contract_with_real_voltage():
         })
         assert response.status_code == 200
         frame = response.json()["frames"][0]
-        expected = {"quality_score", "anomaly_score", "status", "diagnosis", "top_contributors"}
+        expected = {
+            "quality_score", "anomaly_score", "status", "diagnosis", "top_contributors",
+            "confidence", "arc_instability_score", "spatter_risk_score",
+            "burn_through_risk_score", "low_heat_input_score", "quality_breakdown",
+        }
         assert expected <= frame.keys()
+        assert frame["prediction"] in {
+            "Healthy Arc", "Arc Instability", "Spatter Risk",
+            "Burn Through Risk", "Low Heat Input Risk",
+        }
+        assert frame["physics_label"] == frame["prediction"] == frame["ml_label"] == frame["status"]
+        assert 0.0 <= frame["confidence"] <= 1.0
+        assert len(frame["top_contributors"]) == 3
+        assert all(isinstance(item, str) for item in frame["top_contributors"])
 
 
 def test_live_websocket_contract_with_real_voltage():
@@ -38,6 +50,7 @@ def test_live_websocket_contract_with_real_voltage():
                 assert frame["distance_mm"] == 12.5
                 assert "quality_score" in frame
                 assert "diagnosis" in frame
+                assert "arc_instability_score" in frame
 
 
 def test_http_telemetry_ingestion_and_polling_contract():
