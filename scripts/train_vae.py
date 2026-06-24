@@ -17,6 +17,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data", help="Directory containing MIG Sensor Data/")
     parser.add_argument("--output", default="models")
+    parser.add_argument("--material", default=None)
+    parser.add_argument("--thickness-mm", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--max-windows", type=int, default=30000)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -26,10 +28,18 @@ def main() -> None:
     if not paths:
         raise SystemExit(f"No healthy CSV files found in {Path(args.data) / 'MIG Sensor Data'}")
     X, summaries = load_real_feature_matrix(paths, max_windows=args.max_windows)
-    report = train_healthy_models(X, args.output, epochs=args.epochs, batch_size=args.batch_size)
+    output_dir = args.output
+    if args.material and args.thickness_mm is not None:
+        key = "".join(ch.lower() if ch.isalnum() else "_" for ch in args.material).strip("_")
+        key = f"{key}_{args.thickness_mm:.2f}mm".replace(".", "p")
+        output_dir = str(Path(args.output) / "profiles" / key)
+    report = train_healthy_models(
+        X, output_dir, material=args.material, thickness_mm=args.thickness_mm,
+        epochs=args.epochs, batch_size=args.batch_size,
+    )
     report["source"] = "real_voltage_only"
     report["datasets"] = [asdict(summary) for summary in summaries]
-    output = Path(args.output)
+    output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     (output / "training_report.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))

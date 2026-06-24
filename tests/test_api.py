@@ -69,6 +69,9 @@ def test_http_telemetry_ingestion_and_polling_contract():
         assert latest.status_code == 200
         assert latest.json()["voltage"] == samples
         assert latest.json()["timestamp"] == 123456
+        assert latest.json()["latest_inference"]["event_timestamp_ms"] < 123456
+        assert latest.json()["latest_inference"]["distance_source"] == "estimated"
+        assert latest.json()["latest_inference"]["position_label"] == "Relative Position"
 
         metrics = client.get("/metrics/latest")
         assert metrics.status_code == 200

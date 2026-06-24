@@ -16,35 +16,20 @@ WINDOW_STRIDE = 32
 @dataclass(slots=True)
 class WindowFeatures:
     mean_v: float
-    median_v: float
     rms_v: float
     variance_v: float
     std_v: float
-    min_v: float
-    max_v: float
-    peak_to_peak_v: float
+    ripple: float
     energy: float
     crest_factor: float
-    skewness: float
-    kurtosis: float
-    drift_v: float
-    slope_v_per_s: float
-    arc_stability_index: float
-    ripple: float
-    consistency: float
-    noise_index: float
-    short_circuit_count: int
-    short_circuit_density: float
-    avg_short_duration_ms: float
-    short_circuit_ratio: float
-    dominant_frequency_hz: float
     spectral_entropy: float
     spectral_centroid_hz: float
-    spectral_bandwidth_hz: float
-    low_frequency_ratio: float
-    high_frequency_ratio: float
-    voltage_drop_density: float
+    arc_stability_index: float
+    short_circuit_ratio: float
+    short_circuit_density: float
     spike_density: float
+    mean_abs_delta_v: float
+    p95_abs_delta_v: float
 
     def to_dict(self) -> dict[str, float | int]:
         return asdict(self)
@@ -54,7 +39,7 @@ class WindowFeatures:
 
     @property
     def sc_count(self) -> int:
-        return self.short_circuit_count
+        return int(round(self.short_circuit_density * WINDOW_SIZE / SAMPLING_RATE_HZ))
 
     @classmethod
     def names(cls) -> list[str]:
@@ -87,22 +72,16 @@ def extract(
     variance = float(np.mean(centered * centered))
     std = math.sqrt(max(variance, 0.0))
     rms = float(np.sqrt(np.mean(v * v)))
-    minimum, maximum = float(v.min()), float(v.max())
-    peak_to_peak = maximum - minimum
     energy = float(np.mean(v * v))
     crest = float(np.max(np.abs(v)) / (rms + EPS))
-    skewness = float(np.mean(centered**3) / (std**3 + EPS)) if n > 2 else 0.0
-    kurtosis = float(np.mean(centered**4) / (variance**2 + EPS) - 3.0) if n > 3 else 0.0
-    quarter = max(1, n // 4)
-    drift = float(np.mean(v[-quarter:]) - np.mean(v[:quarter]))
-    x = np.arange(n, dtype=np.float64) / sampling_rate_hz
-    slope = float(np.polyfit(x, v, 1)[0]) if n > 1 else 0.0
 
     dv = np.diff(v)
     ripple = float(np.sqrt(np.mean(dv * dv))) if dv.size else 0.0
-    noise = float(np.median(np.abs(dv - np.median(dv))) * 1.4826) if dv.size else 0.0
+    abs_dv = np.abs(dv)
+    robust_dv = float(np.median(np.abs(dv - np.median(dv))) * 1.4826) if dv.size else 0.0
+    mean_abs_delta = float(abs_dv.mean()) if abs_dv.size else 0.0
+    p95_abs_delta = float(np.quantile(abs_dv, 0.95)) if abs_dv.size else 0.0
     coefficient_of_variation = std / (abs(mean) + EPS)
-    consistency = float(100.0 / (1.0 + 4.0 * coefficient_of_variation + ripple / (abs(mean) + EPS)))
 
     # Short-circuit threshold is relative to each operating voltage. The 8 V
     # cap is supported by the real datasets, whose stable arc centers are 15-20 V.
@@ -112,8 +91,7 @@ def extract(
     short_count = int(short_runs.size)
     short_ratio = float(short_mask.mean())
     short_density = float(short_count * sampling_rate_hz / n)
-    short_duration = float(short_runs.mean() * 1000.0 / sampling_rate_hz) if short_runs.size else 0.0
-    robust_dv = noise + EPS
+    robust_dv += EPS
     drop_density = float(np.mean(dv < -max(1.0, 3.0 * robust_dv))) if dv.size else 0.0
     spike_density = float(np.mean(np.abs(dv) > max(1.5, 4.0 * robust_dv))) if dv.size else 0.0
     stability = float(100.0 * np.exp(-(
@@ -131,18 +109,12 @@ def extract(
     nonzero = probability > 0
     entropy = float(-np.sum(probability[nonzero] * np.log2(probability[nonzero])) /
                     max(math.log2(probability.size), EPS))
-    dominant = float(frequencies[int(np.argmax(power))])
     centroid = float(np.sum(frequencies * power) / total_power)
-    bandwidth = float(np.sqrt(np.sum(((frequencies - centroid) ** 2) * power) / total_power))
-    low_ratio = float(power[frequencies <= 50.0].sum() / total_power)
-    high_ratio = float(power[frequencies >= 150.0].sum() / total_power)
 
     return WindowFeatures(
-        mean, median, rms, variance, std, minimum, maximum, peak_to_peak,
-        energy, crest, skewness, kurtosis, drift, slope, stability, ripple,
-        consistency, noise, short_count, short_density, short_duration,
-        short_ratio, dominant, entropy, centroid, bandwidth, low_ratio,
-        high_ratio, drop_density, spike_density,
+        mean, rms, variance, std, ripple, energy, crest, entropy, centroid,
+        stability, short_ratio, short_density, spike_density + drop_density,
+        mean_abs_delta, p95_abs_delta,
     )
 
 

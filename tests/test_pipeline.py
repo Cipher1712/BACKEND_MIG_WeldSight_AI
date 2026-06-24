@@ -15,10 +15,10 @@ def real_window() -> list[float]:
 
 def test_feature_vector_is_finite_and_complete_on_real_voltage():
     features = extract(real_window())
-    assert len(features.to_vector()) == len(WindowFeatures.names()) == 30
+    assert len(features.to_vector()) == len(WindowFeatures.names()) == 15
     assert np.isfinite(features.to_vector()).all()
     assert 0 <= features.spectral_entropy <= 1
-    assert features.median_v >= 8
+    assert features.mean_v >= 8
 
 
 def test_window_latency_contract_on_real_voltage():
@@ -55,5 +55,5 @@ def test_fallback_inference_contract_on_real_voltage():
         "stability": 0.40,
         "short_circuit": 0.25,
         "ripple": 0.20,
-        "noise": 0.15,
+        "spike_density": 0.15,
     }

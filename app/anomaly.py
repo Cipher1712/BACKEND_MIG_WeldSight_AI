@@ -14,6 +14,7 @@ from .dynamic_threshold import DynamicThreshold
 class AnomalyResult:
     score: float
     is_anomaly: bool
+    level: str
     ewma_score: float
     isolation_score: float
     vae_score: float
@@ -26,6 +27,19 @@ def _calibrate(value: float, reference: dict[str, float]) -> float:
     median = float(reference.get("median", 0.0))
     high = float(reference.get("q995", reference.get("q95", median + 1.0)))
     return float(np.clip((value - median) / max(high - median, 1e-9), 0.0, 1.0))
+
+
+def _level(score: float, bands: dict[str, float]) -> str:
+    watch = float(bands.get("watch", 0.60))
+    warning = float(bands.get("warning", 0.78))
+    normal = float(bands.get("normal", min(watch, 0.45)))
+    if score >= warning:
+        return "Critical"
+    if score >= watch:
+        return "Warning"
+    if score >= normal:
+        return "Watch"
+    return "Normal"
 
 
 class AnomalyDetector:
@@ -60,15 +74,20 @@ class AnomalyDetector:
             )
             vae_score = 0.75 * reconstruction_score + 0.25 * latent_score
 
-        # VAE is primary. Physics and EWMA provide responsiveness and the
-        # Isolation Forest provides a geometrically different corroboration.
+        weights = self.cfg.get("fusion_weights", {})
+        vae_w = float(weights.get("vae", 0.42))
+        forest_w = float(weights.get("isolation_forest", 0.24))
+        ewma_w = float(weights.get("ewma", 0.18))
+        physics_w = float(weights.get("physics", 0.16))
+        total_w = max(vae_w + forest_w + ewma_w + physics_w, 1e-9)
         score = (
-            0.55 * vae_score + 0.20 * isolation_score +
-            0.15 * ewma_score + 0.10 * float(np.clip(physics_score, 0.0, 1.0))
-        )
+            vae_w * vae_score + forest_w * isolation_score +
+            ewma_w * ewma_score + physics_w * float(np.clip(physics_score, 0.0, 1.0))
+        ) / total_w
         threshold = float(self.cfg.get("anomaly_threshold", 0.65))
+        level = _level(score, self.cfg.get("score_bands", {}))
         return AnomalyResult(
-            round(score, 6), score >= threshold, round(ewma_score, 6),
+            round(score, 6), score >= threshold, level, round(ewma_score, 6),
             round(isolation_score, 6), round(vae_score, 6), threshold,
             round(reconstruction_error, 6), round(latent_distance, 6),
         )

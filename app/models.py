@@ -25,9 +25,11 @@ class AnomalyEvent(Base):
     __tablename__ = "anomaly_events"
     id = Column(Integer, primary_key=True, autoincrement=True)
     ts = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    event_timestamp_ms = Column(Integer)
     material = Column(String, nullable=False)
     thickness_mm = Column(Numeric(6, 2), nullable=False)
     distance_mm = Column(Numeric(10, 3))
+    distance_source = Column(String)
     anomaly_score = Column(Numeric(10, 4))
     threshold = Column(Numeric(10, 4))
     physics_label = Column(String)

@@ -65,6 +65,7 @@ class InferIn(BaseModel):
     thickness_mm: float = Field(default=6.0, gt=0, le=100)
     voltage: list[float] = Field(min_length=WINDOW_SIZE, max_length=2_000_000)
     distance: list[float] | None = None
+    timestamps_ms: list[int] | None = None
 
 
 class TelemetryIn(BaseModel):
@@ -72,8 +73,14 @@ class TelemetryIn(BaseModel):
 
     voltage: list[float] = Field(min_length=1, max_length=20_000)
     distance_mm: float = 0.0
+    distance: list[float] | None = None
+    distance_source: str = "estimated"
+    encoder_counts: float | None = None
+    encoder_mm_per_count: float = 1.0
     arc_on: bool = True
     timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
+    timestamp_ms: int | None = None
+    timestamps_ms: list[int] | None = None
     material: str = "mild_steel"
     thickness_mm: float = Field(default=6.0, gt=0, le=100)
 
@@ -90,6 +97,13 @@ class TelemetryIn(BaseModel):
         if not math.isfinite(value):
             raise ValueError("value must be a finite number")
         return value
+
+    @field_validator("distance")
+    @classmethod
+    def distance_must_be_finite(cls, values: list[float] | None) -> list[float] | None:
+        if values is not None and any(not math.isfinite(value) for value in values):
+            raise ValueError("distance values must be finite numbers")
+        return values
 
 
 def _profile_to_dict(profile: Profile) -> dict:
@@ -109,10 +123,19 @@ def _display_label(label: str | None) -> str:
     return LABELS.get(label, label)
 
 
-def _persist_event(distance: float, result: dict, material: str, thickness_mm: float) -> None:
+def _persist_event(
+    distance: float,
+    result: dict,
+    material: str,
+    thickness_mm: float,
+    event_timestamp_ms: int | None = None,
+    distance_source: str | None = None,
+) -> None:
     with get_session() as session:
         session.add(AnomalyEvent(
+            event_timestamp_ms=event_timestamp_ms,
             material=material, thickness_mm=thickness_mm, distance_mm=distance,
+            distance_source=distance_source,
             anomaly_score=result["anomaly_score"], threshold=result.get("anomaly_threshold", 0.60),
             physics_label=result["physics_label"], severity=result["severity"],
             quality_index=result["quality_index"], voltage_features=result["voltage_features"],
@@ -122,7 +145,9 @@ def _persist_event(distance: float, result: dict, material: str, thickness_mm: f
 def _event_row_to_dict(row: AnomalyEvent) -> dict:
     return {
         "timestamp": row.ts.isoformat() if row.ts else None, "material": row.material,
+        "event_timestamp_ms": row.event_timestamp_ms,
         "thickness_mm": float(row.thickness_mm), "distance_mm": float(row.distance_mm or 0),
+        "distance_source": row.distance_source or "estimated",
         "anomaly_score": float(row.anomaly_score or 0), "physics_label": _display_label(row.physics_label),
         "severity": row.severity, "quality_index": row.quality_index,
         "voltage_features": row.voltage_features,
@@ -134,12 +159,16 @@ def _build_live_frame(
     timestamp: int,
     voltage: float,
     distance_mm: float,
+    distance_source: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "timestamp": timestamp,
+        "event_timestamp_ms": timestamp,
         "voltage": voltage,
         "distance_mm": distance_mm,
+        "distance_source": distance_source,
+        "position_label": "Distance" if distance_source == "encoder" else "Relative Position",
         "quality_score": result["quality_score"],
         "status": result["status"],
         "diagnosis": result["diagnosis"],
@@ -150,6 +179,7 @@ def _build_live_frame(
         "anomaly_score": result["anomaly_score"],
         "anomaly_threshold": result["anomaly_threshold"],
         "anomaly_detected": result["anomaly_detected"],
+        "anomaly_level": result["anomaly_level"],
         "anomaly_stages": result["anomaly_stages"],
         "physics_label": result["physics_label"],
         "ml_label": result["ml_label"],
@@ -172,17 +202,21 @@ def _build_live_frame(
 async def _process_telemetry_packet(packet: dict[str, Any], material: str, thickness_mm: float) -> list[dict[str, Any]]:
     frames: list[dict[str, Any]] = []
     windows = telemetry_state.append_packet(packet)
-    for window, distance_mm in windows:
+    for window, distance_mm, window_time_ms, distance_source in windows:
         features = extract(window)
         result = pipeline.predict_features(features, material, thickness_mm)
         frame = _build_live_frame(
-            timestamp=int(packet["timestamp"]),
+            timestamp=window_time_ms,
             voltage=float(window[-1]),
             distance_mm=distance_mm,
+            distance_source=distance_source,
             result=result,
         )
         if result["anomaly_detected"]:
-            await asyncio.to_thread(_persist_event, distance_mm, result, material, thickness_mm)
+            await asyncio.to_thread(
+                _persist_event, distance_mm, result, material, thickness_mm,
+                window_time_ms, distance_source,
+            )
         telemetry_state.record_frame(frame)
         await hub.broadcast(frame)
         frames.append(frame)
@@ -227,15 +261,28 @@ def train_profile(request: ProfileIn) -> dict:
 def infer(request: InferIn) -> dict:
     if request.distance is not None and len(request.distance) != len(request.voltage):
         raise HTTPException(422, "distance and voltage arrays must have equal length")
+    if request.timestamps_ms is not None and len(request.timestamps_ms) != len(request.voltage):
+        raise HTTPException(422, "timestamps_ms and voltage arrays must have equal length")
     frames, feature_rows = [], []
-    for distance, features in windowize(request.voltage, request.distance):
+    for index, (distance, features) in enumerate(windowize(request.voltage, request.distance)):
         result = pipeline.predict_features(features, request.material, request.thickness_mm)
-        frame = {"timestamp": int(time.time() * 1000), "voltage": features.mean_v,
-                 "distance_mm": distance, **result}
+        midpoint = index * WINDOW_STRIDE + WINDOW_SIZE // 2
+        event_time = (
+            int(request.timestamps_ms[midpoint])
+            if request.timestamps_ms is not None and midpoint < len(request.timestamps_ms)
+            else int(time.time() * 1000)
+        )
+        distance_source = "encoder" if request.distance is not None else "estimated"
+        frame = {
+            "timestamp": event_time, "event_timestamp_ms": event_time, "voltage": features.mean_v,
+            "distance_mm": distance, "distance_source": distance_source,
+            "position_label": "Distance" if distance_source == "encoder" else "Relative Position",
+            **result,
+        }
         frames.append(frame)
         feature_rows.append(features.to_vector().tolist())
         if result["anomaly_detected"]:
-            _persist_event(distance, result, request.material, request.thickness_mm)
+            _persist_event(distance, result, request.material, request.thickness_mm, event_time, distance_source)
     return {"frames": frames, "cluster": project_and_cluster(feature_rows), "model_ready": pipeline.ready}
 
 
@@ -249,10 +296,16 @@ def events(limit: int = Query(200, ge=1, le=2000)) -> list[dict]:
 @app.post("/telemetry")
 async def ingest_telemetry(request: TelemetryIn) -> dict:
     packet = request.model_dump()
+    if packet.get("timestamp_ms") is not None:
+        packet["timestamp"] = int(packet["timestamp_ms"])
+    if packet.get("distance") is not None and len(packet["distance"]) != len(packet["voltage"]):
+        raise HTTPException(422, "distance and voltage arrays must have equal length")
+    if packet.get("timestamps_ms") is not None and len(packet["timestamps_ms"]) != len(packet["voltage"]):
+        raise HTTPException(422, "timestamps_ms and voltage arrays must have equal length")
     frames = await _process_telemetry_packet(packet, request.material, request.thickness_mm)
     return {
         "status": "accepted",
-        "timestamp": request.timestamp,
+        "timestamp": packet["timestamp"],
         "samples_received": len(request.voltage),
         "frames_processed": len(frames),
         "model_ready": pipeline.ready,

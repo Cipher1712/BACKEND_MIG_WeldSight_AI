@@ -1,434 +1,105 @@
 {
-  "model_health": {
-    "model_ready": true,
-    "vae_loaded": true,
-    "scaler_loaded": true,
-    "threshold_loaded": true,
-    "isolation_forest_loaded": true
+  "windows": {
+    "healthy": 10424,
+    "anomalous": 4576,
+    "unknown": 0
   },
-  "healthy": {
-    "files": [
-      {
-        "file": "data\\MIG Sensor Data\\Sample  0.csv",
-        "windows": 479,
-        "anomaly_score_mean": 0.0528937599164927,
-        "anomaly_score_p95": 0.2406898999999998,
-        "quality_score_mean": 92.49686847599165,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 472,
-          "Unstable Arc": 4
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 1.csv",
-        "windows": 487,
-        "anomaly_score_mean": 0.061550899383983566,
-        "anomaly_score_p95": 0.2408815999999999,
-        "quality_score_mean": 90.94250513347022,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 477,
-          "Unstable Arc": 7
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 10.csv",
-        "windows": 475,
-        "anomaly_score_mean": 0.08211975157894737,
-        "anomaly_score_p95": 0.3367246999999994,
-        "quality_score_mean": 87.93052631578948,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 467,
-          "Unstable Arc": 5
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 11.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.086203124,
-        "anomaly_score_p95": 0.34035194999999985,
-        "quality_score_mean": 87.182,
-        "statuses": {
-          "Healthy Arc": 498,
-          "Critical Arc": 2
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 12.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.08138975600000001,
-        "anomaly_score_p95": 0.37007114999999996,
-        "quality_score_mean": 87.668,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 496,
-          "Unstable Arc": 1
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 13.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.085057052,
-        "anomaly_score_p95": 0.4043257499999996,
-        "quality_score_mean": 86.884,
-        "statuses": {
-          "Critical Arc": 5,
-          "Healthy Arc": 490,
-          "Unstable Arc": 5
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 14.csv",
-        "windows": 489,
-        "anomaly_score_mean": 0.08186317382413089,
-        "anomaly_score_p95": 0.3552831999999999,
-        "quality_score_mean": 87.71165644171779,
-        "statuses": {
-          "Unstable Arc": 4,
-          "Healthy Arc": 485
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 15.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.07325219599999999,
-        "anomaly_score_p95": 0.3137110499999999,
-        "quality_score_mean": 88.414,
-        "statuses": {
-          "Critical Arc": 1,
-          "Healthy Arc": 494,
-          "Unstable Arc": 5
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 16.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.08298884200000001,
-        "anomaly_score_p95": 0.38816110000000004,
-        "quality_score_mean": 87.472,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 492,
-          "Unstable Arc": 5
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 17.csv",
-        "windows": 485,
-        "anomaly_score_mean": 0.1007264969072165,
-        "anomaly_score_p95": 0.5056887999999997,
-        "quality_score_mean": 85.02680412371134,
-        "statuses": {
-          "Healthy Arc": 459,
-          "Unstable Arc": 14,
-          "Critical Arc": 12
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 18.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.122262602,
-        "anomaly_score_p95": 0.34912924999999995,
-        "quality_score_mean": 86.892,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 488,
-          "Unstable Arc": 9
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 19.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.09819243799999999,
-        "anomaly_score_p95": 0.4680423499999992,
-        "quality_score_mean": 85.85,
-        "statuses": {
-          "Critical Arc": 14,
-          "Healthy Arc": 477,
-          "Unstable Arc": 9
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 2.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.05128586200000001,
-        "anomaly_score_p95": 0.16988999999999954,
-        "quality_score_mean": 92.022,
-        "statuses": {
-          "Critical Arc": 2,
-          "Healthy Arc": 494,
-          "Unstable Arc": 4
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 20.csv",
-        "windows": 499,
-        "anomaly_score_mean": 0.13183361322645293,
-        "anomaly_score_p95": 0.6009289999999997,
-        "quality_score_mean": 81.62124248496994,
-        "statuses": {
-          "Critical Arc": 22,
-          "Unstable Arc": 9,
-          "Healthy Arc": 468
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 21.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.080786866,
-        "anomaly_score_p95": 0.34474019999999966,
-        "quality_score_mean": 87.968,
-        "statuses": {
-          "Critical Arc": 4,
-          "Healthy Arc": 485,
-          "Unstable Arc": 11
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 22.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.082704342,
-        "anomaly_score_p95": 0.38424194999999994,
-        "quality_score_mean": 87.586,
-        "statuses": {
-          "Critical Arc": 1,
-          "Healthy Arc": 494,
-          "Unstable Arc": 5
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 23.csv",
-        "windows": 475,
-        "anomaly_score_mean": 0.09417571368421052,
-        "anomaly_score_p95": 0.42942259999999977,
-        "quality_score_mean": 86.1621052631579,
-        "statuses": {
-          "Critical Arc": 8,
-          "Healthy Arc": 457,
-          "Unstable Arc": 10
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 24.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.062857,
-        "anomaly_score_p95": 0.28389664999999953,
-        "quality_score_mean": 90.36,
-        "statuses": {
-          "Critical Arc": 2,
-          "Healthy Arc": 492,
-          "Unstable Arc": 6
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 25.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.075151872,
-        "anomaly_score_p95": 0.31971014999999997,
-        "quality_score_mean": 88.536,
-        "statuses": {
-          "Critical Arc": 7,
-          "Unstable Arc": 5,
-          "Healthy Arc": 488
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 26.csv",
-        "windows": 482,
-        "anomaly_score_mean": 0.11052541701244814,
-        "anomaly_score_p95": 0.46326769999999984,
-        "quality_score_mean": 84.08298755186722,
-        "statuses": {
-          "Critical Arc": 14,
-          "Healthy Arc": 459,
-          "Unstable Arc": 9
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 27.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.084997948,
-        "anomaly_score_p95": 0.38379679999999977,
-        "quality_score_mean": 87.25,
-        "statuses": {
-          "Critical Arc": 7,
-          "Healthy Arc": 489,
-          "Unstable Arc": 4
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 28.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.05753300199999999,
-        "anomaly_score_p95": 0.2713795999999999,
-        "quality_score_mean": 92.062,
-        "statuses": {
-          "Healthy Arc": 491,
-          "Unstable Arc": 9
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 29.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.086480866,
-        "anomaly_score_p95": 0.45900649999999904,
-        "quality_score_mean": 87.204,
-        "statuses": {
-          "Critical Arc": 11,
-          "Unstable Arc": 10,
-          "Healthy Arc": 479
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 3.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.049414940000000004,
-        "anomaly_score_p95": 0.18786949999999955,
-        "quality_score_mean": 91.92,
-        "statuses": {
-          "Critical Arc": 1,
-          "Healthy Arc": 498,
-          "Unstable Arc": 1
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 30.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.091736036,
-        "anomaly_score_p95": 0.4344162999999996,
-        "quality_score_mean": 86.484,
-        "statuses": {
-          "Critical Arc": 11,
-          "Unstable Arc": 8,
-          "Healthy Arc": 481
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 31.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.087810414,
-        "anomaly_score_p95": 0.3717435499999992,
-        "quality_score_mean": 86.506,
-        "statuses": {
-          "Critical Arc": 9,
-          "Healthy Arc": 486,
-          "Unstable Arc": 5
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 4.csv",
-        "windows": 482,
-        "anomaly_score_mean": 0.09566302074688796,
-        "anomaly_score_p95": 0.40585119999999997,
-        "quality_score_mean": 85.75311203319502,
-        "statuses": {
-          "Critical Arc": 1,
-          "Healthy Arc": 471,
-          "Unstable Arc": 10
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 5.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.090631084,
-        "anomaly_score_p95": 0.4247531999999998,
-        "quality_score_mean": 85.68,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 495,
-          "Unstable Arc": 2
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 6.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.08216226800000001,
-        "anomaly_score_p95": 0.4119844999999994,
-        "quality_score_mean": 86.928,
-        "statuses": {
-          "Critical Arc": 3,
-          "Healthy Arc": 496,
-          "Unstable Arc": 1
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 7.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.10999641800000001,
-        "anomaly_score_p95": 0.47964734999999964,
-        "quality_score_mean": 83.956,
-        "statuses": {
-          "Unstable Arc": 7,
-          "Healthy Arc": 484,
-          "Critical Arc": 9
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 8.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.09686739,
-        "anomaly_score_p95": 0.5092889499999999,
-        "quality_score_mean": 85.024,
-        "statuses": {
-          "Critical Arc": 10,
-          "Unstable Arc": 2,
-          "Healthy Arc": 488
-        }
-      },
-      {
-        "file": "data\\MIG Sensor Data\\Sample 9.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.08374025599999999,
-        "anomaly_score_p95": 0.37361604999999953,
-        "quality_score_mean": 87.148,
-        "statuses": {
-          "Critical Arc": 8,
-          "Healthy Arc": 487,
-          "Unstable Arc": 5
-        }
-      }
-    ],
-    "total_windows": 15853
+  "false_positive_rate_at_watch": 0.050077,
+  "false_positive_rate_at_warning": 0.010073,
+  "detection_rate_at_watch": 0.040865,
+  "detection_rate_at_warning": 0.007649,
+  "false_negative_rate_at_watch": 0.959135,
+  "score_summary": {
+    "healthy": {
+      "mean": 0.13168421923721832,
+      "std": 0.10466077467207867,
+      "p50": 0.1019107682175936,
+      "p95": 0.343421187464826,
+      "p99": 0.5461051826981461
+    },
+    "anomalous": {
+      "mean": 0.13059104350947318,
+      "std": 0.09796885606607399,
+      "p50": 0.10462569414651401,
+      "p95": 0.3188903845491565,
+      "p99": 0.5023096714633567
+    }
   },
-  "conditions": {
-    "files": [
-      {
-        "file": "data\\Data_I64_V15.8.csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.052541875999999994,
-        "anomaly_score_p95": 0.20469884999999996,
-        "quality_score_mean": 91.678,
-        "statuses": {
-          "Unstable Arc": 1,
-          "Healthy Arc": 499
-        }
+  "vae_validation": {
+    "reconstruction_error": {
+      "healthy": {
+        "mean": 0.14368067633539133,
+        "std": 2.9148044856921635,
+        "p50": 0.032387735322117805,
+        "p95": 0.27085479348897973,
+        "p99": 0.6953527587652208
       },
-      {
-        "file": "data\\Data_I76_V15.8 (1).csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.08979015,
-        "anomaly_score_p95": 0.3635264999999999,
-        "quality_score_mean": 86.734,
-        "statuses": {
-          "Healthy Arc": 497,
-          "Unstable Arc": 3
-        }
-      },
-      {
-        "file": "data\\Data_I84_V16.5 (1).csv",
-        "windows": 500,
-        "anomaly_score_mean": 0.072132676,
-        "anomaly_score_p95": 0.29124734999999974,
-        "quality_score_mean": 88.804,
-        "statuses": {
-          "Unstable Arc": 5,
-          "Critical Arc": 2,
-          "Healthy Arc": 493
-        }
+      "anomalous": {
+        "mean": 0.12559444568543476,
+        "std": 2.2202664440036006,
+        "p50": 0.031650472432374954,
+        "p95": 0.2465381994843483,
+        "p99": 0.5892923772335052
       }
-    ],
-    "total_windows": 1500
+    },
+    "latent_distance": {
+      "healthy": {
+        "mean": 0.7785133664679934,
+        "std": 0.6528193881783744,
+        "p50": 0.6375389397144318,
+        "p95": 1.79476392865181,
+        "p99": 3.4090423321723997
+      },
+      "anomalous": {
+        "mean": 0.7102900970518797,
+        "std": 0.5264753255218451,
+        "p50": 0.615459531545639,
+        "p95": 1.3403458297252655,
+        "p99": 2.965386986732483
+      }
+    },
+    "vae_score": {
+      "healthy": {
+        "mean": 0.05515764981333917,
+        "std": 0.12400745045019419,
+        "p50": 0.009536356303626424,
+        "p95": 0.25688149117903186,
+        "p99": 0.6851289623452961
+      },
+      "anomalous": {
+        "mean": 0.04749713036678187,
+        "std": 0.10611405617198331,
+        "p50": 0.008188845607966216,
+        "p95": 0.2250507243954503,
+        "p99": 0.5493015450744011
+      }
+    },
+    "vae_reliability_score": 49.23
+  },
+  "isolation_forest_validation": {
+    "healthy": {
+      "mean": 0.09196957066792474,
+      "std": 0.1911600554629972,
+      "p50": 0.0,
+      "p95": 0.5879816887737149,
+      "p99": 0.8917196183646261
+    },
+    "anomalous": {
+      "mean": 0.07136716568917997,
+      "std": 0.16006536780759353,
+      "p50": 0.0,
+      "p95": 0.4360901827678728,
+      "p99": 0.8430621778999916
+    },
+    "correlation_with_vae": 0.8111444883612872,
+    "usefulness": "complementary",
+    "note": "Isolation Forest is retained even when highly correlated; removal requires a separate design decision."
+  },
+  "threshold_analysis": {
+    "normal_threshold": 0.2574061275304218,
+    "watch_threshold": 0.343421187464826,
+    "warning_threshold": 0.5461051826981461,
+    "critical_threshold": 0.6089064802195833,
+    "rationale": "Bands are calibrated from healthy anomaly-score percentiles: p90, p95, p99, and p99.5."
   }
 }

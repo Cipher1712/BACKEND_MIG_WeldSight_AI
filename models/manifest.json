@@ -1,26 +1,45 @@
 {
-  "version": 1,
-  "model_ready": true,
-  "vae_loaded": true,
-  "scaler_loaded": true,
-  "threshold_loaded": true,
-  "isolation_forest_loaded": true,
-  "artifacts": {
-    "vae.pt": {
-      "bytes": 29417,
-      "sha256": "b96fde1543153d0e28fa39a8042afac7596b6c94d86525c87b5fd2390ce10bbf"
-    },
-    "scaler.pkl": {
-      "bytes": 1303,
-      "sha256": "8d386faa257795faf0d8bbfdcc74d013d5d76f6e08ecacbb16b873e881a6efe9"
-    },
-    "anomaly_threshold.json": {
-      "bytes": 4292,
-      "sha256": "21f3fad4f11c98fbcc4b549da1dd87cf85f3b6f0eb734d551d6e692754fa17e7"
-    },
-    "isolation_forest.pkl": {
-      "bytes": 2752285,
-      "sha256": "b7eae958c4643152b0cd029766c3a6e9aef87be52409bf00bdf22a4a4b8bd59e"
-    }
+  "feature_count": 15,
+  "feature_names": [
+    "mean_v",
+    "rms_v",
+    "variance_v",
+    "std_v",
+    "ripple",
+    "energy",
+    "crest_factor",
+    "spectral_entropy",
+    "spectral_centroid_hz",
+    "arc_stability_index",
+    "short_circuit_ratio",
+    "short_circuit_density",
+    "spike_density",
+    "mean_abs_delta_v",
+    "p95_abs_delta_v"
+  ],
+  "profiles": [
+    "unknown_material_0p00mm"
+  ],
+  "reports_dir": "models\\reports",
+  "generated_artifacts": [
+    "models\\scaler.pkl",
+    "models\\vae.pt",
+    "models\\isolation_forest.pkl",
+    "models\\anomaly_threshold.json",
+    "models\\profiles\\unknown_material_0p00mm\\scaler.pkl",
+    "models\\profiles\\unknown_material_0p00mm\\vae.pt",
+    "models\\profiles\\unknown_material_0p00mm\\isolation_forest.pkl",
+    "models\\profiles\\unknown_material_0p00mm\\anomaly_threshold.json",
+    "models\\reports\\dataset_inventory.json",
+    "models\\reports\\feature_audit.json",
+    "models\\reports\\training_report.json",
+    "models\\reports\\validation_report.json",
+    "models\\reports\\reliability_report.json",
+    "models\\reports\\industrial_detection_audit.json",
+    "models\\reports\\final_backend_report.md"
+  ],
+  "deployment_readiness": {
+    "verdict": "Ready for Demo",
+    "justification": "Artifacts and reports are complete, but validation sensitivity/false positives need trial confirmation before industrial validation."
   }
 }

@@ -121,7 +121,7 @@ def _top_contributors(features: WindowFeatures, reference: dict, label: str, ris
         reference, "short_circuit_density", features.short_circuit_density, 5.0, 60.0
     )
     high_short_ratio = _risk_high(reference, "short_circuit_ratio", features.short_circuit_ratio, 0.02, 0.40)
-    high_noise = _risk_high(reference, "noise_index", features.noise_index, 0.5, 4.0)
+    high_spike = _risk_high(reference, "spike_density", features.spike_density, 0.01, 0.25)
 
     if label == "Healthy Arc":
         healthy_terms = [
@@ -142,7 +142,7 @@ def _top_contributors(features: WindowFeatures, reference: dict, label: str, ris
         (high_voltage, "Elevated Mean Voltage"),
         (low_energy, "Low Electrical Energy"),
         (low_voltage, "Reduced Mean Voltage"),
-        (high_noise, "Elevated Voltage Noise"),
+        (high_spike, "Elevated Voltage Spikes"),
     ]
     selected = [name for value, name in sorted(terms, reverse=True) if value > 0.0]
     return (selected + ["Stable Arc Behavior", "Controlled Heat Input", "Low Short-Circuit Activity"])[:3]
@@ -162,13 +162,13 @@ def assess(features: WindowFeatures, reference: dict | None = None) -> PhysicsAs
         max(0.0, 1.0 - features.arc_stability_index / 100.0) * 0.40 +
         min(1.0, features.short_circuit_ratio / 0.40) * 0.25 +
         min(1.0, features.ripple / max(abs(features.mean_v), 1.0)) * 0.20 +
-        min(1.0, features.noise_index / max(abs(features.mean_v), 1.0)) * 0.15
+        min(1.0, features.spike_density / 0.25) * 0.15
     ))
     quality_breakdown = {
         "stability": 0.40,
         "short_circuit": 0.25,
         "ripple": 0.20,
-        "noise": 0.15,
+        "spike_density": 0.15,
     }
     risks = _risk_scores(features, ref)
     if high_energy and high_voltage:

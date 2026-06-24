@@ -9,11 +9,16 @@ from typing import Any
 from .features import WINDOW_SIZE, WINDOW_STRIDE
 
 
+SAMPLE_PERIOD_MS = 1000.0 / 750.0
+
+
 class TelemetryState:
     def __init__(self, history_size: int = 500, event_size: int = 100) -> None:
         self._lock = RLock()
         self._voltage_buffer: list[float] = []
         self._distance_buffer: list[float] = []
+        self._timestamp_buffer: list[int] = []
+        self._distance_source_buffer: list[str] = []
         self._history: deque[dict[str, Any]] = deque(maxlen=history_size)
         self._events: deque[dict[str, Any]] = deque(maxlen=event_size)
         self._latest_packet: dict[str, Any] | None = None
@@ -21,7 +26,7 @@ class TelemetryState:
         self._latest_metrics: dict[str, Any] | None = None
         self._latest_timestamp: int | None = None
 
-    def append_packet(self, packet: dict[str, Any]) -> list[tuple[list[float], float]]:
+    def append_packet(self, packet: dict[str, Any]) -> list[tuple[list[float], float, int, str]]:
         with self._lock:
             self._latest_packet = deepcopy(packet)
             self._latest_timestamp = int(packet["timestamp"])
@@ -30,21 +35,52 @@ class TelemetryState:
             if not packet.get("arc_on", True):
                 self._voltage_buffer.clear()
                 self._distance_buffer.clear()
+                self._timestamp_buffer.clear()
+                self._distance_source_buffer.clear()
                 return []
 
             samples = [float(value) for value in packet["voltage"]]
-            distance = float(packet.get("distance_mm", 0.0))
-            self._voltage_buffer.extend(samples)
-            self._distance_buffer.extend([distance] * len(samples))
+            timestamps = packet.get("timestamps_ms")
+            if isinstance(timestamps, list) and len(timestamps) == len(samples):
+                sample_times = [int(value) for value in timestamps]
+            else:
+                end_time = int(packet.get("timestamp_ms") or packet["timestamp"])
+                sample_times = [
+                    int(round(end_time - (len(samples) - 1 - index) * SAMPLE_PERIOD_MS))
+                    for index in range(len(samples))
+                ]
 
-            windows: list[tuple[list[float], float]] = []
+            distances = packet.get("distance")
+            distance_source = str(packet.get("distance_source", "estimated"))
+            if isinstance(distances, list) and len(distances) == len(samples):
+                sample_distances = [float(value) for value in distances]
+                distance_source = "encoder" if packet.get("encoder_counts") is not None else distance_source
+            elif packet.get("encoder_counts") is not None:
+                counts = float(packet["encoder_counts"])
+                calibration = float(packet.get("encoder_mm_per_count", 1.0))
+                sample_distances = [counts * calibration] * len(samples)
+                distance_source = "encoder"
+            else:
+                distance = float(packet.get("distance_mm", 0.0))
+                sample_distances = [distance] * len(samples)
+            self._voltage_buffer.extend(samples)
+            self._distance_buffer.extend(sample_distances)
+            self._timestamp_buffer.extend(sample_times)
+            self._distance_source_buffer.extend([distance_source] * len(samples))
+
+            windows: list[tuple[list[float], float, int, str]] = []
             while len(self._voltage_buffer) >= WINDOW_SIZE:
+                midpoint = WINDOW_SIZE // 2
                 windows.append((
                     list(self._voltage_buffer[:WINDOW_SIZE]),
-                    float(self._distance_buffer[WINDOW_SIZE - 1]),
+                    float(self._distance_buffer[midpoint]),
+                    int(self._timestamp_buffer[midpoint]),
+                    str(self._distance_source_buffer[midpoint]),
                 ))
                 del self._voltage_buffer[:WINDOW_STRIDE]
                 del self._distance_buffer[:WINDOW_STRIDE]
+                del self._timestamp_buffer[:WINDOW_STRIDE]
+                del self._distance_source_buffer[:WINDOW_STRIDE]
             return windows
 
     def record_frame(self, frame: dict[str, Any]) -> None:

@@ -21,6 +21,7 @@ def repair_sqlite_autoincrement_tables() -> None:
             return
         id_col = next((row for row in rows if row["name"] == "id"), None)
         if id_col is None or str(id_col["type"]).upper() == "INTEGER":
+            _ensure_event_columns(conn)
             return
         conn.execute(text("DROP INDEX IF EXISTS idx_events_ts"))
         conn.execute(text("DROP INDEX IF EXISTS idx_events_profile"))
@@ -28,9 +29,11 @@ def repair_sqlite_autoincrement_tables() -> None:
             CREATE TABLE anomaly_events_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                event_timestamp_ms INTEGER,
                 material VARCHAR NOT NULL,
                 thickness_mm NUMERIC(6, 2) NOT NULL,
                 distance_mm NUMERIC(10, 3),
+                distance_source VARCHAR,
                 anomaly_score NUMERIC(10, 4),
                 threshold NUMERIC(10, 4),
                 physics_label VARCHAR,
@@ -41,11 +44,11 @@ def repair_sqlite_autoincrement_tables() -> None:
         """))
         conn.execute(text("""
             INSERT INTO anomaly_events_new (
-                id, ts, material, thickness_mm, distance_mm, anomaly_score,
+                id, ts, event_timestamp_ms, material, thickness_mm, distance_mm, distance_source, anomaly_score,
                 threshold, physics_label, severity, quality_index, voltage_features
             )
             SELECT
-                id, ts, material, thickness_mm, distance_mm, anomaly_score,
+                id, ts, NULL, material, thickness_mm, distance_mm, NULL, anomaly_score,
                 threshold, physics_label, severity, quality_index, voltage_features
             FROM anomaly_events
             WHERE id IS NOT NULL
@@ -54,6 +57,16 @@ def repair_sqlite_autoincrement_tables() -> None:
         conn.execute(text("ALTER TABLE anomaly_events_new RENAME TO anomaly_events"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_events_ts ON anomaly_events (ts DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_events_profile ON anomaly_events (material, thickness_mm)"))
+        _ensure_event_columns(conn)
+
+
+def _ensure_event_columns(conn) -> None:
+    rows = conn.execute(text("PRAGMA table_info(anomaly_events)")).mappings().all()
+    columns = {row["name"] for row in rows}
+    if "event_timestamp_ms" not in columns:
+        conn.execute(text("ALTER TABLE anomaly_events ADD COLUMN event_timestamp_ms INTEGER"))
+    if "distance_source" not in columns:
+        conn.execute(text("ALTER TABLE anomaly_events ADD COLUMN distance_source VARCHAR"))
 
 
 @contextmanager
