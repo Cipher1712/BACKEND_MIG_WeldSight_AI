@@ -340,4 +340,5 @@ Place these under `MODEL_DIR` before deploying. Without them the service runs in
 
 ## License
 
-MIT
+Centre of Excellence in Advanced Manufacturing Technology, Indian Institute of Technology Kharagpur
+
