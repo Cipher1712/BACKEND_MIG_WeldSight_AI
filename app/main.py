@@ -42,7 +42,7 @@ app = FastAPI(title="WeldSight AI", version="2.0.0", lifespan=lifespan)
 origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware, allow_origins=origins, allow_credentials=origins != ["*"],
-    allow_methods=["*"], allow_headers=["*"],
+    allow_methods=["*"], allow_headers=["*"], expose_headers=["Content-Disposition"],
 )
 
 
@@ -166,6 +166,21 @@ def _event_row_to_dict(row: AnomalyEvent) -> dict:
         "severity": row.severity, "quality_index": row.quality_index,
         "voltage_features": row.voltage_features,
         "recording_session_id": row.recording_session_id,
+    }
+
+
+@app.get("/model/info")
+def model_info() -> dict:
+    thresholds = pipeline.thresholds or {}
+    return {
+        "current_model_version": thresholds.get("model_version") or thresholds.get("trained_at") or ("ready" if pipeline.ready else "untrained"),
+        "model_version": thresholds.get("model_version"),
+        "training_date": thresholds.get("trained_at"),
+        "threshold_version": thresholds.get("threshold_version") or thresholds.get("trained_at"),
+        "sampling_rate_hz": 750,
+        "window_size": WINDOW_SIZE,
+        "stride": WINDOW_STRIDE,
+        **pipeline.health(),
     }
 
 
@@ -314,6 +329,16 @@ def get_recording(session_id: str) -> dict:
         raise HTTPException(404, "recording not found") from exc
 
 
+@app.get("/recordings/{session_id}/samples")
+def get_recording_samples(session_id: str) -> dict:
+    try:
+        return recording_manager.samples(session_id)
+    except KeyError as exc:
+        raise HTTPException(404, "recording not found") from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get("/recordings/{session_id}/download")
 def download_recording(session_id: str) -> FileResponse:
     try:
@@ -335,10 +360,11 @@ def delete_recording(session_id: str) -> dict:
 
 
 @app.post("/recordings/{session_id}/healthy-baseline")
-def mark_healthy_baseline(session_id: str, request: HealthyBaselineIn) -> dict:
+def mark_healthy_baseline(session_id: str, request: HealthyBaselineIn | None = None) -> dict:
     try:
+        payload = request or HealthyBaselineIn()
         return recording_manager.mark_healthy(
-            session_id, healthy_baseline=request.healthy_baseline, notes=request.notes,
+            session_id, healthy_baseline=payload.healthy_baseline, notes=payload.notes,
         )
     except KeyError as exc:
         raise HTTPException(404, "recording not found") from exc

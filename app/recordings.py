@@ -10,6 +10,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 from uuid import uuid4
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -38,6 +40,9 @@ TRAINING_STAGES = {
     "Completed": 100,
     "Failed": 100,
 }
+
+CSV_COLUMNS = ["timestamp", "voltage", "encoder_count", "distance_mm", "sample_index"]
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class TrainingStatus:
@@ -144,6 +149,10 @@ class RecordingManager:
                 ))
                 self._next_sample_index += 1
             with get_session() as session:
+                row = session.query(RecordingSession).filter_by(session_id=session_id).first()
+                if row is not None:
+                    row.material = str(packet.get("material", row.material or "mild_steel"))
+                    row.thickness_mm = float(packet.get("thickness_mm", row.thickness_mm or 6.0))
                 session.add_all(rows)
             return len(rows)
 
@@ -299,15 +308,19 @@ class RecordingManager:
 
     def _write_csv(self, session_id: str) -> tuple[Path, int]:
         self.recording_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
-        path = self.recording_dir / f"Session_{timestamp}_{session_id[:8]}.csv"
         with get_session() as session:
+            session_row = session.query(RecordingSession).filter_by(session_id=session_id).one()
+            started_at = int(session_row.start_timestamp)
+            material = _filename_token(session_row.material or "mild_steel")
+            thickness = _filename_token(f"{float(session_row.thickness_mm or 6.0):g}mm")
+            timestamp = datetime.fromtimestamp(started_at / 1000, tz=timezone.utc).astimezone(IST).strftime("%Y-%m-%d_%H-%M-%S")
+            path = self.recording_dir / f"{timestamp}_{material}_{thickness}.csv"
             rows = session.query(TelemetrySample).filter_by(
                 session_id=session_id
             ).order_by(TelemetrySample.sample_index.asc()).all()
             with path.open("w", newline="") as handle:
                 writer = csv.writer(handle)
-                writer.writerow(["timestamp_ms", "voltage", "encoder_count", "distance_mm", "sample_index"])
+                writer.writerow(CSV_COLUMNS)
                 for row in rows:
                     writer.writerow([
                         int(row.timestamp_ms),
@@ -323,6 +336,7 @@ class RecordingManager:
         csv_size = int(row.csv_size_bytes or 0)
         if row.csv_path and Path(row.csv_path).exists():
             csv_size = Path(row.csv_path).stat().st_size
+        voltage_summary = RecordingManager._voltage_summary(row.session_id)
         return {
             "session_id": row.session_id,
             "start_timestamp": int(row.start_timestamp),
@@ -332,14 +346,83 @@ class RecordingManager:
             "sampling_rate_hz": float(row.sampling_rate_hz) if row.sampling_rate_hz is not None else None,
             "distance_mm": float(row.distance_mm) if row.distance_mm is not None else 0.0,
             "distance_source": row.distance_source or "Estimated",
+            "material": row.material or "mild_steel",
+            "thickness_mm": float(row.thickness_mm or 6.0),
             "trained": bool(row.trained),
             "healthy_baseline": bool(row.healthy_baseline),
+            "training_status": "completed" if row.trained else "not_started",
             "notes": row.notes,
             "created_at": row.created_at.isoformat() if row.created_at else None,
+            "created_time": int(row.start_timestamp),
             "csv_path": row.csv_path,
             "csv_size_bytes": csv_size,
             "session_name": f"Session {row.session_id[:8]}",
             "model_version_used": row.model_version_used,
+            "model_version": row.model_version_used,
+            "duration": float(row.duration_ms or 0) / 1000.0,
+            "duration_s": float(row.duration_ms or 0) / 1000.0,
+            "sampling_rate": float(row.sampling_rate_hz) if row.sampling_rate_hz is not None else None,
+            "csv_size": csv_size,
+            "avg_voltage": voltage_summary["avg_voltage"],
+            "rms_voltage": voltage_summary["rms_voltage"],
+            "timeline": [
+                {"label": "Created", "timestamp": int(row.start_timestamp), "completed": True},
+                {"label": "Recorded", "timestamp": int(row.end_timestamp) if row.end_timestamp else None, "completed": row.end_timestamp is not None},
+                {"label": "Healthy Baseline", "completed": bool(row.healthy_baseline)},
+                {"label": "Trained", "completed": bool(row.trained)},
+                {"label": "Model Deployed", "completed": bool(row.trained and row.model_version_used)},
+            ],
+        }
+
+    @staticmethod
+    def _voltage_summary(session_id: str) -> dict[str, float | None]:
+        with get_session() as session:
+            rows = session.query(TelemetrySample.voltage).filter_by(session_id=session_id).all()
+        if not rows:
+            return {"avg_voltage": None, "rms_voltage": None}
+        values = np.array([float(row[0]) for row in rows], dtype=np.float64)
+        return {
+            "avg_voltage": float(np.mean(values)),
+            "rms_voltage": float(np.sqrt(np.mean(np.square(values)))),
+        }
+
+    def samples(self, session_id: str) -> dict[str, Any]:
+        data = self.get(session_id)
+        path = self.csv_path(session_id)
+        frame = pd.read_csv(path)
+        timestamp_column = "timestamp" if "timestamp" in frame.columns else "timestamp_ms"
+        required = {timestamp_column, "voltage", "encoder_count", "distance_mm", "sample_index"}
+        missing = sorted(required - set(frame.columns))
+        if missing:
+            raise ValueError(f"recording CSV missing required columns: {missing}")
+        timestamps = pd.to_numeric(frame[timestamp_column], errors="coerce")
+        voltage = pd.to_numeric(frame["voltage"], errors="coerce")
+        distance = pd.to_numeric(frame["distance_mm"], errors="coerce")
+        sample_index = pd.to_numeric(frame["sample_index"], errors="coerce")
+        encoder = pd.to_numeric(frame["encoder_count"], errors="coerce")
+        valid = timestamps.notna() & voltage.notna() & distance.notna() & sample_index.notna()
+        samples = [
+            {
+                "timestamp": int(timestamps.iloc[index]),
+                "voltage": float(voltage.iloc[index]),
+                "encoder_count": None if pd.isna(encoder.iloc[index]) else float(encoder.iloc[index]),
+                "distance_mm": float(distance.iloc[index]),
+                "sample_index": int(sample_index.iloc[index]),
+            }
+            for index in frame.index[valid]
+        ]
+        voltages = np.array([sample["voltage"] for sample in samples], dtype=np.float64)
+        return {
+            "recording": data,
+            "columns": CSV_COLUMNS,
+            "samples": samples,
+            "audit": {
+                "rows": int(len(frame)),
+                "valid_rows": len(samples),
+                "duplicate_timestamps": len(samples) - len({sample["timestamp"] for sample in samples}),
+                "avg_voltage": float(np.mean(voltages)) if len(voltages) else None,
+                "rms_voltage": float(np.sqrt(np.mean(np.square(voltages)))) if len(voltages) else None,
+            },
         }
 
     @staticmethod
@@ -347,7 +430,8 @@ class RecordingManager:
         if not path.exists() or path.stat().st_size == 0:
             raise ValueError("recording CSV is empty or missing")
         frame = pd.read_csv(path)
-        required = {"timestamp_ms", "voltage", "encoder_count", "distance_mm", "sample_index"}
+        timestamp_column = "timestamp" if "timestamp" in frame.columns else "timestamp_ms"
+        required = {timestamp_column, "voltage", "encoder_count", "distance_mm", "sample_index"}
         missing = sorted(required - set(frame.columns))
         if missing:
             raise ValueError(f"recording CSV missing required columns: {missing}")
@@ -355,7 +439,7 @@ class RecordingManager:
             raise ValueError("recording CSV contains no samples")
         voltage = pd.to_numeric(frame["voltage"], errors="coerce").to_numpy(dtype=np.float64)
         distance = pd.to_numeric(frame["distance_mm"], errors="coerce").to_numpy(dtype=np.float64)
-        timestamps = pd.to_numeric(frame["timestamp_ms"], errors="coerce").to_numpy(dtype=np.float64)
+        timestamps = pd.to_numeric(frame[timestamp_column], errors="coerce").to_numpy(dtype=np.float64)
         finite_mask = np.isfinite(voltage) & np.isfinite(distance) & np.isfinite(timestamps)
         dropped = int(len(voltage) - int(finite_mask.sum()))
         voltage = voltage[finite_mask]
@@ -375,6 +459,7 @@ class RecordingManager:
             "dropped_rows": dropped,
             "duplicate_timestamps": duplicate_timestamps,
             "duration_ms": int(timestamps[-1] - timestamps[0]) if len(timestamps) > 1 else 0,
+            "timestamp_column": timestamp_column,
         }
 
     @staticmethod
@@ -519,3 +604,8 @@ class RecordingManager:
 
 
 recording_manager = RecordingManager()
+
+
+def _filename_token(value: str) -> str:
+    token = "".join(ch for ch in str(value).replace(" ", "") if ch.isalnum() or ch in ("-", "_"))
+    return token or "Unknown"

@@ -132,7 +132,7 @@ def test_recording_session_generates_raw_csv_and_metadata():
         downloaded = client.get(f"/recordings/{session_id}/download")
         assert downloaded.status_code == 200
         lines = downloaded.text.strip().splitlines()
-        assert lines[0] == "timestamp_ms,voltage,encoder_count,distance_mm,sample_index"
+        assert lines[0] == "timestamp,voltage,encoder_count,distance_mm,sample_index"
         assert lines[1].startswith("1000,14.0,10.0,2.5,0")
         assert len(lines) == 5
 
@@ -146,6 +146,9 @@ def test_recording_session_generates_raw_csv_and_metadata():
         )
         assert marked.status_code == 200
         assert marked.json()["healthy_baseline"] is True
+        marked_without_body = client.post(f"/recordings/{session_id}/healthy-baseline")
+        assert marked_without_body.status_code == 200
+        assert marked_without_body.json()["healthy_baseline"] is True
 
         deleted = client.delete(f"/recordings/{session_id}")
         assert deleted.status_code == 200

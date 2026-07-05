@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Numeric, TIMESTAMP, JSON, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Numeric, TIMESTAMP, JSON, UniqueConstraint, func, BigInteger
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -25,7 +25,7 @@ class AnomalyEvent(Base):
     __tablename__ = "anomaly_events"
     id = Column(Integer, primary_key=True, autoincrement=True)
     ts = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    event_timestamp_ms = Column(Integer)
+    event_timestamp_ms = Column(BigInteger)
     material = Column(String, nullable=False)
     thickness_mm = Column(Numeric(6, 2), nullable=False)
     distance_mm = Column(Numeric(10, 3))
@@ -43,13 +43,15 @@ class RecordingSession(Base):
     __tablename__ = "recording_sessions"
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String, nullable=False, unique=True, index=True)
-    start_timestamp = Column(Integer, nullable=False)
-    end_timestamp = Column(Integer)
+    start_timestamp = Column(BigInteger, nullable=False)
+    end_timestamp = Column(BigInteger)
     duration_ms = Column(Integer, nullable=False, default=0)
     sample_count = Column(Integer, nullable=False, default=0)
     sampling_rate_hz = Column(Numeric(10, 3))
     distance_mm = Column(Numeric(10, 3))
     distance_source = Column(String, nullable=False, default="Estimated")
+    material = Column(String, nullable=False, default="mild_steel")
+    thickness_mm = Column(Numeric(6, 2), nullable=False, default=6.0)
     trained = Column(Boolean, nullable=False, default=False)
     healthy_baseline = Column(Boolean, nullable=False, default=False)
     notes = Column(String)
@@ -64,7 +66,7 @@ class TelemetrySample(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String, ForeignKey("recording_sessions.session_id"), nullable=False, index=True)
     sample_index = Column(Integer, nullable=False)
-    timestamp_ms = Column(Integer, nullable=False)
+    timestamp_ms = Column(BigInteger, nullable=False)
     voltage = Column(Numeric(12, 6), nullable=False)
     encoder_count = Column(Numeric(14, 4))
     distance_mm = Column(Numeric(10, 3), nullable=False)

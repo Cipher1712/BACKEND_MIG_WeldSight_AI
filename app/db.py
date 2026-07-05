@@ -81,6 +81,10 @@ def _ensure_recording_columns(conn) -> None:
     columns = {row["name"] for row in rows}
     if "model_version_used" not in columns:
         conn.execute(text("ALTER TABLE recording_sessions ADD COLUMN model_version_used VARCHAR"))
+    if "material" not in columns:
+        conn.execute(text("ALTER TABLE recording_sessions ADD COLUMN material VARCHAR NOT NULL DEFAULT 'mild_steel'"))
+    if "thickness_mm" not in columns:
+        conn.execute(text("ALTER TABLE recording_sessions ADD COLUMN thickness_mm NUMERIC(6, 2) NOT NULL DEFAULT 6.0"))
 
 
 @contextmanager
