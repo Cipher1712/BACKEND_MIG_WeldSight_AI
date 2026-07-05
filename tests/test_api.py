@@ -1,5 +1,9 @@
+import shutil
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+from app import recordings
 from app.main import app
 from app.welding_data import healthy_dataset_paths, iter_real_windows
 
@@ -92,3 +96,138 @@ def test_http_telemetry_rejects_malformed_payload():
         })
         assert response.status_code == 422
         assert "detail" in response.json()
+
+
+def test_recording_session_generates_raw_csv_and_metadata():
+    with TestClient(app) as client:
+        client.post("/recording/stop")
+        started = client.post("/recording/start", json={"notes": "pytest recording"})
+        assert started.status_code == 200
+        session_id = started.json()["session_id"]
+
+        response = client.post("/telemetry", json={
+            "voltage": [14.0, 14.5, 15.0, 15.5],
+            "encoder_counts": 10,
+            "encoder_mm_per_count": 0.25,
+            "arc_on": True,
+            "timestamp": 1003,
+            "timestamps_ms": [1000, 1001, 1002, 1003],
+        })
+        assert response.status_code == 200
+
+        stopped = client.post("/recording/stop")
+        assert stopped.status_code == 200
+        metadata = stopped.json()
+        assert metadata["session_id"] == session_id
+        assert metadata["sample_count"] == 4
+        assert metadata["duration_ms"] == 3
+        assert metadata["distance_mm"] == 2.5
+        assert metadata["distance_source"] == "Encoder"
+        assert metadata["csv_size_bytes"] > 0
+
+        listed = client.get("/recordings")
+        assert listed.status_code == 200
+        assert any(row["session_id"] == session_id for row in listed.json())
+
+        downloaded = client.get(f"/recordings/{session_id}/download")
+        assert downloaded.status_code == 200
+        lines = downloaded.text.strip().splitlines()
+        assert lines[0] == "timestamp_ms,voltage,encoder_count,distance_mm,sample_index"
+        assert lines[1].startswith("1000,14.0,10.0,2.5,0")
+        assert len(lines) == 5
+
+        unmarked_training = client.post(f"/training/from-recording/{session_id}")
+        assert unmarked_training.status_code == 400
+        assert "healthy_baseline" in unmarked_training.json()["detail"]
+
+        marked = client.post(
+            f"/recordings/{session_id}/healthy-baseline",
+            json={"healthy_baseline": True, "notes": "healthy pytest recording"},
+        )
+        assert marked.status_code == 200
+        assert marked.json()["healthy_baseline"] is True
+
+        deleted = client.delete(f"/recordings/{session_id}")
+        assert deleted.status_code == 200
+
+
+def test_training_from_healthy_recording_writes_reports_and_marks_trained(monkeypatch):
+    def fake_train(matrix, output_dir, **_):
+        assert matrix.shape[0] >= 1
+        return {
+            "training_windows": int(matrix.shape[0]),
+            "validation_windows": 1,
+            "validation_reconstruction": 0.01,
+            "artifacts": ["vae.pt", "scaler.pkl", "isolation_forest.pkl", "anomaly_threshold.json"],
+        }
+
+    model_dir = Path("models") / "_pytest_reports"
+    if model_dir.exists():
+        shutil.rmtree(model_dir)
+    monkeypatch.setattr(recordings.recording_manager, "model_dir", model_dir)
+    monkeypatch.setattr(recordings, "train_healthy_models", fake_train)
+    monkeypatch.setattr(recordings.RecordingManager, "_deploy_staged_artifacts", lambda self, staging_dir: None)
+    monkeypatch.setattr(recordings.RecordingManager, "_validate_staged_model", staticmethod(
+        lambda staging_dir, features, matrix: {
+            "passed": True,
+            "failure_reason": None,
+            "false_positive_rate": 0.0,
+            "detection_rate": 1.0,
+            "threshold_separation": 0.5,
+            "auc": 1.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "healthy_window_count": 2,
+            "training_window_count": int(matrix.shape[0]),
+            "validation_window_count": 2,
+        }
+    ))
+
+    try:
+        with TestClient(app) as client:
+            client.post("/recording/stop")
+            started = client.post("/recording/start", json={"healthy_baseline": True})
+            assert started.status_code == 200
+            session_id = started.json()["session_id"]
+            samples = [15.0 + (index % 5) * 0.1 for index in range(96)]
+            response = client.post("/telemetry", json={
+                "voltage": samples,
+                "encoder_counts": list(range(96)),
+                "encoder_mm_per_count": 0.5,
+                "arc_on": True,
+                "timestamp": 2095,
+                "timestamps_ms": list(range(2000, 2096)),
+            })
+            assert response.status_code == 200
+            assert client.post("/recording/stop").status_code == 200
+
+            trained = client.post(f"/training/from-recording/{session_id}")
+            assert trained.status_code == 200
+            body = trained.json()
+            assert body["status"] == "success"
+            assert body["model_reloaded"] is True
+            assert body["reports"] == [
+                "evaluation_report.json",
+                "pipeline_audit.json",
+                "reliability_report.json",
+                "training_report.json",
+                "validation_report.json",
+            ]
+            assert (model_dir / "reports" / "training_report.json").exists()
+            status = client.get("/training/status")
+            assert status.status_code == 200
+            assert status.json()["status"] == "Completed"
+            recording = client.get(f"/recordings/{session_id}").json()
+            assert recording["trained"] is True
+            assert recording["model_version_used"]
+            inference = client.post("/api/infer", json={
+                "material": "mild_steel",
+                "thickness_mm": 6,
+                "voltage": real_samples(96),
+            })
+            assert inference.status_code == 200
+            assert inference.json()["frames"][0]["prediction"]
+            assert client.delete(f"/recordings/{session_id}").status_code == 200
+    finally:
+        if model_dir.exists():
+            shutil.rmtree(model_dir)

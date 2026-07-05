@@ -7,9 +7,7 @@ from threading import RLock
 from typing import Any
 
 from .features import WINDOW_SIZE, WINDOW_STRIDE
-
-
-SAMPLE_PERIOD_MS = 1000.0 / 750.0
+from .sample_utils import api_distance_source, packet_samples
 
 
 class TelemetryState:
@@ -39,34 +37,13 @@ class TelemetryState:
                 self._distance_source_buffer.clear()
                 return []
 
-            samples = [float(value) for value in packet["voltage"]]
-            timestamps = packet.get("timestamps_ms")
-            if isinstance(timestamps, list) and len(timestamps) == len(samples):
-                sample_times = [int(value) for value in timestamps]
-            else:
-                end_time = int(packet.get("timestamp_ms") or packet["timestamp"])
-                sample_times = [
-                    int(round(end_time - (len(samples) - 1 - index) * SAMPLE_PERIOD_MS))
-                    for index in range(len(samples))
-                ]
-
-            distances = packet.get("distance")
-            distance_source = str(packet.get("distance_source", "estimated"))
-            if isinstance(distances, list) and len(distances) == len(samples):
-                sample_distances = [float(value) for value in distances]
-                distance_source = "encoder" if packet.get("encoder_counts") is not None else distance_source
-            elif packet.get("encoder_counts") is not None:
-                counts = float(packet["encoder_counts"])
-                calibration = float(packet.get("encoder_mm_per_count", 1.0))
-                sample_distances = [counts * calibration] * len(samples)
-                distance_source = "encoder"
-            else:
-                distance = float(packet.get("distance_mm", 0.0))
-                sample_distances = [distance] * len(samples)
-            self._voltage_buffer.extend(samples)
-            self._distance_buffer.extend(sample_distances)
-            self._timestamp_buffer.extend(sample_times)
-            self._distance_source_buffer.extend([distance_source] * len(samples))
+            samples = packet_samples(packet)
+            self._voltage_buffer.extend(float(sample["voltage"]) for sample in samples)
+            self._distance_buffer.extend(float(sample["distance_mm"]) for sample in samples)
+            self._timestamp_buffer.extend(int(sample["timestamp_ms"]) for sample in samples)
+            self._distance_source_buffer.extend(
+                api_distance_source(str(sample["distance_source"])) for sample in samples
+            )
 
             windows: list[tuple[list[float], float, int, str]] = []
             while len(self._voltage_buffer) >= WINDOW_SIZE:

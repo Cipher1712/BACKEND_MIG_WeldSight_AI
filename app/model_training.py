@@ -35,27 +35,34 @@ def train_healthy_models(
     latent_dims: tuple[int, ...] = (4, 6, 8),
     epochs: int = 25,
     batch_size: int = 256,
+    progress_callback=None,
 ) -> dict:
     if len(X) < 100:
         raise ValueError("at least 100 real healthy windows are required")
+    if progress_callback is not None:
+        progress_callback("Training Scaler", 30)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(42)
     order = rng.permutation(len(X))
-    validation_size = max(100, int(0.15 * len(X)))
+    validation_size = min(max(20, int(0.15 * len(X))), len(X) - 1)
     validation_idx, train_idx = order[:validation_size], order[validation_size:]
 
     scaler = StandardScaler().fit(X[train_idx])
     scaled = scaler.transform(X).astype(np.float32)
     joblib.dump(scaler, output / "scaler.pkl")
 
+    if progress_callback is not None:
+        progress_callback("Training Isolation Forest", 42)
     isolation = IsolationForest(
         n_estimators=300, max_samples="auto", contamination="auto",
         random_state=42, n_jobs=1,
     ).fit(scaled[train_idx])
     joblib.dump(isolation, output / "isolation_forest.pkl")
 
+    if progress_callback is not None:
+        progress_callback("Training VAE", 50)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     train_tensor = torch.from_numpy(scaled[train_idx])
     loader = DataLoader(
@@ -66,11 +73,12 @@ def train_healthy_models(
     feature_scale = torch.as_tensor(scaler.scale_, dtype=torch.float32, device=device)
     best: tuple[float, int, PhysicsInformedVAE] | None = None
 
-    for latent_dim in latent_dims:
+    total_variants = max(len(latent_dims), 1)
+    for variant_index, latent_dim in enumerate(latent_dims):
         torch.manual_seed(42)
         model = PhysicsInformedVAE(scaled.shape[1], latent_dim).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=8e-4, weight_decay=1e-5)
-        for _ in range(epochs):
+        for epoch in range(epochs):
             model.train()
             for (batch,) in loader:
                 batch = batch.to(device)
@@ -83,6 +91,11 @@ def train_healthy_models(
                 )
                 loss.backward()
                 optimizer.step()
+            if progress_callback is not None:
+                span_start = 50 + int(30 * variant_index / total_variants)
+                span_end = 50 + int(30 * (variant_index + 1) / total_variants)
+                progress = span_start + int((span_end - span_start) * (epoch + 1) / max(epochs, 1))
+                progress_callback("Training VAE", min(progress, 80))
         model.eval()
         with torch.inference_mode():
             validation = torch.from_numpy(scaled[validation_idx]).to(device)
@@ -104,6 +117,8 @@ def train_healthy_models(
     latent_distances = np.sqrt(np.mean(((latent_values - latent_center) / latent_scale) ** 2, axis=1))
     isolation_raw = -isolation.decision_function(scaled)
     feature_names = WindowFeatures.names()
+    if progress_callback is not None:
+        progress_callback("Computing Adaptive Thresholds", 82)
     validation_scaled = scaled[validation_idx].copy()
     base_forest = -isolation.decision_function(validation_scaled)
     rng_importance = np.random.default_rng(43)

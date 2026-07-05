@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -20,6 +21,7 @@ from .features import WINDOW_SIZE, WINDOW_STRIDE, extract, windowize
 from .inference import InferencePipeline
 from .models import AnomalyEvent, Base, Profile
 from .physics import LABELS
+from .recordings import recording_manager, training_status
 from .telemetry_state import telemetry_state
 from .training import train_baseline
 
@@ -75,12 +77,14 @@ class TelemetryIn(BaseModel):
     distance_mm: float = 0.0
     distance: list[float] | None = None
     distance_source: str = "estimated"
-    encoder_counts: float | None = None
+    encoder_counts: float | list[float] | None = None
+    encoder_count: float | list[float] | None = None
     encoder_mm_per_count: float = 1.0
     arc_on: bool = True
     timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
     timestamp_ms: int | None = None
     timestamps_ms: list[int] | None = None
+    relative_timestamps_ms: list[int] | None = None
     material: str = "mild_steel"
     thickness_mm: float = Field(default=6.0, gt=0, le=100)
 
@@ -104,6 +108,14 @@ class TelemetryIn(BaseModel):
         if values is not None and any(not math.isfinite(value) for value in values):
             raise ValueError("distance values must be finite numbers")
         return values
+
+    @field_validator("encoder_counts", "encoder_count")
+    @classmethod
+    def encoder_must_be_finite(cls, value: float | list[float] | None) -> float | list[float] | None:
+        values = value if isinstance(value, list) else ([value] if value is not None else [])
+        if any(not math.isfinite(float(item)) for item in values):
+            raise ValueError("encoder counts must be finite numbers")
+        return value
 
 
 def _profile_to_dict(profile: Profile) -> dict:
@@ -130,6 +142,7 @@ def _persist_event(
     thickness_mm: float,
     event_timestamp_ms: int | None = None,
     distance_source: str | None = None,
+    recording_session_id: str | None = None,
 ) -> None:
     with get_session() as session:
         session.add(AnomalyEvent(
@@ -139,6 +152,7 @@ def _persist_event(
             anomaly_score=result["anomaly_score"], threshold=result.get("anomaly_threshold", 0.60),
             physics_label=result["physics_label"], severity=result["severity"],
             quality_index=result["quality_index"], voltage_features=result["voltage_features"],
+            recording_session_id=recording_session_id,
         ))
 
 
@@ -151,6 +165,7 @@ def _event_row_to_dict(row: AnomalyEvent) -> dict:
         "anomaly_score": float(row.anomaly_score or 0), "physics_label": _display_label(row.physics_label),
         "severity": row.severity, "quality_index": row.quality_index,
         "voltage_features": row.voltage_features,
+        "recording_session_id": row.recording_session_id,
     }
 
 
@@ -201,6 +216,8 @@ def _build_live_frame(
 
 async def _process_telemetry_packet(packet: dict[str, Any], material: str, thickness_mm: float) -> list[dict[str, Any]]:
     frames: list[dict[str, Any]] = []
+    recording_session_id = recording_manager.active_session_id
+    await asyncio.to_thread(recording_manager.record_packet, packet)
     windows = telemetry_state.append_packet(packet)
     for window, distance_mm, window_time_ms, distance_source in windows:
         features = extract(window)
@@ -215,7 +232,7 @@ async def _process_telemetry_packet(packet: dict[str, Any], material: str, thick
         if result["anomaly_detected"]:
             await asyncio.to_thread(
                 _persist_event, distance_mm, result, material, thickness_mm,
-                window_time_ms, distance_source,
+                window_time_ms, distance_source, recording_session_id,
             )
         telemetry_state.record_frame(frame)
         await hub.broadcast(frame)
@@ -255,6 +272,92 @@ def train_profile(request: ProfileIn) -> dict:
                 if hasattr(profile, key):
                     setattr(profile, key, value)
     return result
+
+
+class RecordingStartIn(BaseModel):
+    notes: str | None = None
+    healthy_baseline: bool = False
+
+
+class HealthyBaselineIn(BaseModel):
+    healthy_baseline: bool = True
+    notes: str | None = None
+
+
+@app.post("/recording/start")
+def start_recording(request: RecordingStartIn | None = None) -> dict:
+    try:
+        payload = request or RecordingStartIn()
+        return recording_manager.start(notes=payload.notes, healthy_baseline=payload.healthy_baseline)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/recording/stop")
+def stop_recording() -> dict:
+    try:
+        return recording_manager.stop()
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/recordings")
+def list_recordings() -> list[dict]:
+    return recording_manager.list()
+
+
+@app.get("/recordings/{session_id}")
+def get_recording(session_id: str) -> dict:
+    try:
+        return recording_manager.get(session_id)
+    except KeyError as exc:
+        raise HTTPException(404, "recording not found") from exc
+
+
+@app.get("/recordings/{session_id}/download")
+def download_recording(session_id: str) -> FileResponse:
+    try:
+        path = recording_manager.csv_path(session_id)
+    except (KeyError, FileNotFoundError) as exc:
+        raise HTTPException(404, "recording CSV not found") from exc
+    return FileResponse(path, media_type="text/csv", filename=path.name)
+
+
+@app.delete("/recordings/{session_id}")
+def delete_recording(session_id: str) -> dict:
+    try:
+        recording_manager.delete(session_id)
+    except KeyError as exc:
+        raise HTTPException(404, "recording not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"status": "deleted", "session_id": session_id}
+
+
+@app.post("/recordings/{session_id}/healthy-baseline")
+def mark_healthy_baseline(session_id: str, request: HealthyBaselineIn) -> dict:
+    try:
+        return recording_manager.mark_healthy(
+            session_id, healthy_baseline=request.healthy_baseline, notes=request.notes,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "recording not found") from exc
+
+
+@app.post("/training/from-recording/{session_id}")
+def train_from_recording(session_id: str) -> dict:
+    try:
+        report = recording_manager.train_from_recording(session_id, reload_callback=pipeline.reload)
+    except KeyError as exc:
+        raise HTTPException(404, "recording not found") from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"status": "success", **report, "model_health": pipeline.health()}
+
+
+@app.get("/training/status")
+def get_training_status() -> dict:
+    return training_status.snapshot()
 
 
 @app.post("/api/infer")
@@ -298,10 +401,16 @@ async def ingest_telemetry(request: TelemetryIn) -> dict:
     packet = request.model_dump()
     if packet.get("timestamp_ms") is not None:
         packet["timestamp"] = int(packet["timestamp_ms"])
+    if packet.get("encoder_counts") is None and packet.get("encoder_count") is not None:
+        packet["encoder_counts"] = packet["encoder_count"]
     if packet.get("distance") is not None and len(packet["distance"]) != len(packet["voltage"]):
         raise HTTPException(422, "distance and voltage arrays must have equal length")
     if packet.get("timestamps_ms") is not None and len(packet["timestamps_ms"]) != len(packet["voltage"]):
         raise HTTPException(422, "timestamps_ms and voltage arrays must have equal length")
+    if packet.get("relative_timestamps_ms") is not None and len(packet["relative_timestamps_ms"]) != len(packet["voltage"]):
+        raise HTTPException(422, "relative_timestamps_ms and voltage arrays must have equal length")
+    if isinstance(packet.get("encoder_counts"), list) and len(packet["encoder_counts"]) != len(packet["voltage"]):
+        raise HTTPException(422, "encoder_counts and voltage arrays must have equal length")
     frames = await _process_telemetry_packet(packet, request.material, request.thickness_mm)
     return {
         "status": "accepted",

@@ -18,10 +18,12 @@ def repair_sqlite_autoincrement_tables() -> None:
     with engine.begin() as conn:
         rows = conn.execute(text("PRAGMA table_info(anomaly_events)")).mappings().all()
         if not rows:
+            _ensure_recording_columns(conn)
             return
         id_col = next((row for row in rows if row["name"] == "id"), None)
         if id_col is None or str(id_col["type"]).upper() == "INTEGER":
             _ensure_event_columns(conn)
+            _ensure_recording_columns(conn)
             return
         conn.execute(text("DROP INDEX IF EXISTS idx_events_ts"))
         conn.execute(text("DROP INDEX IF EXISTS idx_events_profile"))
@@ -58,6 +60,7 @@ def repair_sqlite_autoincrement_tables() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_events_ts ON anomaly_events (ts DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_events_profile ON anomaly_events (material, thickness_mm)"))
         _ensure_event_columns(conn)
+        _ensure_recording_columns(conn)
 
 
 def _ensure_event_columns(conn) -> None:
@@ -67,6 +70,17 @@ def _ensure_event_columns(conn) -> None:
         conn.execute(text("ALTER TABLE anomaly_events ADD COLUMN event_timestamp_ms INTEGER"))
     if "distance_source" not in columns:
         conn.execute(text("ALTER TABLE anomaly_events ADD COLUMN distance_source VARCHAR"))
+    if "recording_session_id" not in columns:
+        conn.execute(text("ALTER TABLE anomaly_events ADD COLUMN recording_session_id VARCHAR"))
+
+
+def _ensure_recording_columns(conn) -> None:
+    rows = conn.execute(text("PRAGMA table_info(recording_sessions)")).mappings().all()
+    if not rows:
+        return
+    columns = {row["name"] for row in rows}
+    if "model_version_used" not in columns:
+        conn.execute(text("ALTER TABLE recording_sessions ADD COLUMN model_version_used VARCHAR"))
 
 
 @contextmanager

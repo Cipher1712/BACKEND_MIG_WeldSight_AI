@@ -101,6 +101,24 @@ class InferencePipeline:
             "isolation_forest_loaded": self.isolation_forest_loaded,
         }
 
+    def reload(self) -> dict[str, bool]:
+        self._profile_cache.clear()
+        self._default_bundle = self._load_bundle(self.model_dir)
+        self.scaler = self._default_bundle["scaler"]
+        self.isolation_forest = self._default_bundle["isolation_forest"]
+        self.thresholds = self._default_bundle["thresholds"]
+        self.vae = self._default_bundle["vae"]
+        self.detector = self._default_bundle["detector"]
+        self.scaler_loaded = self.scaler is not None
+        self.vae_loaded = self.vae is not None
+        self.threshold_loaded = bool(self.thresholds)
+        self.isolation_forest_loaded = self.isolation_forest is not None
+        self.ready = all((
+            self.scaler_loaded, self.vae_loaded, self.threshold_loaded,
+            self.isolation_forest_loaded,
+        ))
+        return self.health()
+
     def _contributors(self, scaled: np.ndarray, vae: Any) -> list[dict[str, float | str]]:
         if vae is not None:
             importance = vae.reconstruction_contributions(scaled)
